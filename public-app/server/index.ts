@@ -10,7 +10,10 @@ import {
   createSession,
   verifySession,
   deleteSession,
+  createUser,
+  listUsers,
 } from "./auth";
+import { getDb } from "./db";
 
 // ─── Init ───
 runMigrations();
@@ -29,7 +32,6 @@ app.get("/api/health", (c) =>
 
 // ─── Auth ───
 
-// Simple rate limiter (in-memory, 5 attempts per 15 min per IP)
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
@@ -43,7 +45,6 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
-// Dev mode helper
 function getDevUser() {
   if (process.env.DEV_MODE === "true") {
     return getUserByEmail("dev@gezy.tech");
@@ -51,7 +52,6 @@ function getDevUser() {
   return null;
 }
 
-// POST /api/auth/login
 app.post("/api/auth/login", async (c) => {
   const ip = c.req.header("x-forwarded-for") ?? "unknown";
   if (!checkRateLimit(ip)) {
@@ -60,7 +60,6 @@ app.post("/api/auth/login", async (c) => {
       429,
     );
   }
-
   const { email, password } = await c.req.json<{
     email?: string;
     password?: string;
@@ -68,12 +67,10 @@ app.post("/api/auth/login", async (c) => {
   if (!email || !password) {
     return c.json({ error: "Email and password are required" }, 400);
   }
-
   const user = getUserByEmail(email);
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     return c.json({ error: "Invalid email or password" }, 401);
   }
-
   const session = createSession(user.id);
   setCookie(c, "session", session.token, {
     httpOnly: true,
@@ -82,7 +79,6 @@ app.post("/api/auth/login", async (c) => {
     path: "/",
     maxAge: 7 * 24 * 60 * 60,
   });
-
   return c.json({
     user: {
       id: user.id,
@@ -93,7 +89,6 @@ app.post("/api/auth/login", async (c) => {
   });
 });
 
-// POST /api/auth/logout
 app.post("/api/auth/logout", (c) => {
   const token = getCookie(c, "session");
   if (token) {
@@ -103,7 +98,6 @@ app.post("/api/auth/logout", (c) => {
   return c.json({ success: true });
 });
 
-// GET /api/auth/me
 app.get("/api/auth/me", (c) => {
   const devUser = getDevUser();
   if (devUser) {
@@ -116,16 +110,12 @@ app.get("/api/auth/me", (c) => {
       },
     });
   }
-
   const token = getCookie(c, "session");
   if (!token) return c.json({ error: "Not authenticated" }, 401);
-
   const session = verifySession(token);
   if (!session) return c.json({ error: "Session expired" }, 401);
-
   const user = getUserById(session.userId);
   if (!user) return c.json({ error: "User not found" }, 401);
-
   return c.json({
     user: {
       id: user.id,
@@ -136,7 +126,6 @@ app.get("/api/auth/me", (c) => {
   });
 });
 
-// Middleware: requireAuth
 async function requireAuth(c: any, next: any) {
   const devUser = getDevUser();
   if (devUser) {
@@ -153,13 +142,68 @@ async function requireAuth(c: any, next: any) {
   return next();
 }
 
-// Protected example route (remove or replace with real routes later)
-app.get("/api/protected", requireAuth, (c) => {
-  const user = c.get("user");
-  return c.json({
-    message: "You are authenticated",
-    user: { id: user.id, email: user.email },
-  });
+// ─── Admin ───
+
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "admin-secret-change-me";
+function adminAuth(c: any, next: any) {
+  const token = c.req.header("x-admin-token") ?? "";
+  if (token !== ADMIN_TOKEN) return c.json({ error: "Forbidden" }, 403);
+  return next();
+}
+
+// Create user (admin)
+app.post("/api/admin/users", adminAuth, async (c) => {
+  const { email, password, displayName, agentSlug } = await c.req.json<{
+    email?: string;
+    password?: string;
+    displayName?: string;
+    agentSlug?: string;
+  }>();
+  if (!email || !password || !agentSlug) {
+    return c.json(
+      { error: "email, password, and agentSlug are required" },
+      400,
+    );
+  }
+  try {
+    const user = await createUser({ email, password, displayName, agentSlug });
+    return c.json(
+      {
+        user: {
+          id: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          agentSlug: user.agentSlug,
+        },
+      },
+      201,
+    );
+  } catch (err: any) {
+    if (err.message?.includes("UNIQUE"))
+      return c.json({ error: "Email already exists" }, 409);
+    return c.json({ error: err.message || "Failed to create user" }, 500);
+  }
+});
+
+// List users (admin)
+app.get("/api/admin/users", adminAuth, (c) => {
+  const users = listUsers().map((u) => ({
+    id: u.id,
+    email: u.email,
+    displayName: u.displayName,
+    agentSlug: u.agentSlug,
+    createdAt: u.createdAt,
+  }));
+  return c.json({ users });
+});
+
+// Delete user (admin)
+app.delete("/api/admin/users/:id", adminAuth, (c) => {
+  const id = c.req.param("id");
+  const db = getDb();
+  const result = db.run("DELETE FROM users WHERE id=?", [id]);
+  if (result.changes === 0) return c.json({ error: "User not found" }, 404);
+  return c.json({ success: true });
 });
 
 // ─── Start ───
