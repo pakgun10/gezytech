@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { MemoryPanel } from "./MemoryPanel";
+import { HistoryPanel } from "./HistoryPanel";
 import { TokenBar, triggerTokenRefresh } from "./TokenBar";
 
 interface Message {
@@ -11,6 +12,14 @@ interface Message {
 }
 
 export function ChatPage({ agentSlug }: { agentSlug: string }) {
+  const loadHistory = (msgs: any[]) => {
+    setMessages(msgs.map((m: any) => ({
+      id: m.id,
+      role: m.role === "user" ? "user" : "agent",
+      content: m.content,
+      timestamp: m.timestamp,
+    })));
+  };
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -160,6 +169,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
         <span style={{ fontWeight: 600 }}>Agent: {agentSlug}</span>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <TokenBar />
+          <HistoryPanel />
           <MemoryPanel />
         </div>
       </div>

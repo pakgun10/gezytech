@@ -270,11 +270,30 @@ app.post("/api/chat", requireAuth, async (c) => {
   });
 });
 
-app.get("/api/chat/history", requireAuth, (c) => {
-  return c.json({
-    messages: [],
-    note: "History will be proxied to gezytech after PUB-20",
-  });
+// Chat history — proxy to gezytech
+app.get("/api/chat/history", requireAuth, async (c) => {
+  const user: any = c.get("user");
+  const agentSlug = user.agentSlug;
+
+  try {
+    const res = await fetch(`${process.env.GEZYTECH_API_URL ?? "http://localhost:3000"}/api/agents/${agentSlug}/messages?limit=100`, {
+      headers: { "x-service-token": SERVICE_TOKEN },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return c.json({ error: `Failed to fetch history: ${text.slice(0, 200)}` }, 502);
+    }
+    const data = await res.json();
+    const messages = (data.messages ?? []).map((m: any) => ({
+      id: m.id,
+      role: m.sourceType === "user" ? "user" : "agent",
+      content: m.content ?? "",
+      timestamp: m.createdAt ?? Date.now(),
+    }));
+    return c.json({ messages });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 502);
+  }
 });
 
 // ─── Token usage ───
