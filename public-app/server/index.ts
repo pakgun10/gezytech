@@ -15,6 +15,7 @@ import {
 } from "./auth";
 import { getDb } from "./db";
 import { sendChatMessage } from "./gezytech-client";
+import { createSoulRequest, listSoulRequestsByUser, listAllSoulRequests, approveSoulRequest, rejectSoulRequest } from "./soul-request";
 
 // ─── Init ───
 runMigrations();
@@ -319,6 +320,46 @@ app.get("/api/memory", requireAuth, (c) => {
     memories: [],
     note: "Memory will be proxied to gezytech after PUB-20",
   });
+});
+
+// ─── SOUL Requests ───
+
+app.post("/api/soul-request", requireAuth, async (c) => {
+  const user: any = c.get("user");
+  const { soulText } = await c.req.json<{ soulText?: string }>();
+  if (!soulText || soulText.length < 10) {
+    return c.json({ error: "SOUL text must be at least 10 characters" }, 400);
+  }
+  const req = createSoulRequest({ userId: user.id, soulText });
+  return c.json({ request: req }, 201);
+});
+
+app.get("/api/soul-requests", requireAuth, (c) => {
+  const user: any = c.get("user");
+  const requests = listSoulRequestsByUser(user.id);
+  return c.json({ requests });
+});
+
+// Admin SOUL endpoints
+app.get("/api/admin/soul-requests", adminAuth, (c) => {
+  const requests = listAllSoulRequests();
+  return c.json({ requests });
+});
+
+app.patch("/api/admin/soul-requests/:id", adminAuth, async (c) => {
+  const id = c.req.param("id");
+  const { action, adminNote } = await c.req.json<{ action?: string; adminNote?: string }>();
+  if (action === "approve") {
+    const updated = approveSoulRequest(id, adminNote);
+    if (!updated) return c.json({ error: "Request not found" }, 404);
+    return c.json({ request: updated });
+  }
+  if (action === "reject") {
+    const updated = rejectSoulRequest(id, adminNote);
+    if (!updated) return c.json({ error: "Request not found" }, 404);
+    return c.json({ request: updated });
+  }
+  return c.json({ error: "Action must be 'approve' or 'reject'" }, 400);
 });
 
 // ─── Start ───

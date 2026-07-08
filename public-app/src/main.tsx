@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { useAuth } from "./useAuth";
 import { LoginPage } from "./LoginPage";
 import { ChatPage } from "./ChatPage";
+import "./style.css";
 
 function App() {
   const { user, loading, login, logout } = useAuth();

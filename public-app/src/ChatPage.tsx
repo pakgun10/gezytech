@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { MemoryPanel } from "./MemoryPanel";
 import { HistoryPanel } from "./HistoryPanel";
+import { SoulRequestButton } from "./SoulRequestButton";
 import { TokenBar, triggerTokenRefresh } from "./TokenBar";
 
 interface Message {
@@ -13,12 +14,14 @@ interface Message {
 
 export function ChatPage({ agentSlug }: { agentSlug: string }) {
   const loadHistory = (msgs: any[]) => {
-    setMessages(msgs.map((m: any) => ({
-      id: m.id,
-      role: m.role === "user" ? "user" : "agent",
-      content: m.content,
-      timestamp: m.timestamp,
-    })));
+    setMessages(
+      msgs.map((m: any) => ({
+        id: m.id,
+        role: m.role === "user" ? "user" : "agent",
+        content: m.content,
+        timestamp: m.timestamp,
+      })),
+    );
   };
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -170,6 +173,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <TokenBar />
           <HistoryPanel />
+          <SoulRequestButton />
           <MemoryPanel />
         </div>
       </div>

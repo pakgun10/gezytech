@@ -1,0 +1,33 @@
+/* GezyTech Public — global styles */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; font-family: system-ui, -apple-system, sans-serif; }
+body { background: #fafafa; color: #1f2937; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+
+/* Typing indicator blink */
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* Skeleton loading */
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.skeleton {
+  background: linear-gradient(90deg, #e5e5e5 25%, #f0f0f0 50%, #e5e5e5 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+/* ─── Mobile responsive ─── */
+@media (max-width: 640px) {
+  .chat-header { padding: 8px 12px !important; font-size: 13px; }
+  .chat-message { max-width: 90% !important; font-size: 13px; }
+  .chat-input-area { padding: 8px !important; }
+  .chat-input-area textarea { font-size: 14px; }
+  .top-bar { padding: 6px 12px !important; }
+  .top-bar span { font-size: 13px !important; }
+  .panel-dropdown { width: 280px !important; max-height: 350px !important; }
+  .login-card { padding: 24px !important; }
+}
