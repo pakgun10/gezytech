@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { useAuth } from "./useAuth";
 import { LoginPage } from "./LoginPage";
+import { ChatPage } from "./ChatPage";
 
 function App() {
   const { user, loading, login, logout } = useAuth();
@@ -21,51 +22,42 @@ function App() {
   }
 
   return (
-    <div style={{ padding: 40, fontFamily: "system-ui" }}>
+    <div style={{ fontFamily: "system-ui" }}>
+      {/* Top bar */}
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: 24,
+          padding: "8px 16px",
+          borderBottom: "1px solid #e5e5e5",
+          background: "#fafafa",
         }}
       >
-        <div>
-          <h1 style={{ margin: 0, fontSize: 24 }}>GezyTech</h1>
-          <p style={{ margin: "4px 0 0", color: "#666", fontSize: 14 }}>
-            {user.displayName} ({user.email}) — Agent: {user.agentSlug}
-          </p>
+        <span style={{ fontWeight: 700, fontSize: 16 }}>GezyTech</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 13, color: "#666" }}>
+            {user.displayName} · {user.agentSlug}
+          </span>
+          <button
+            onClick={logout}
+            style={{
+              padding: "4px 12px",
+              background: "transparent",
+              color: "#ef4444",
+              border: "1px solid #ef4444",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            Logout
+          </button>
         </div>
-        <button
-          onClick={logout}
-          style={{
-            padding: "8px 16px",
-            background: "#ef4444",
-            color: "#fff",
-            border: "none",
-            borderRadius: 8,
-            cursor: "pointer",
-            fontSize: 14,
-          }}
-        >
-          Logout
-        </button>
       </div>
 
-      <div
-        style={{
-          background: "#f0fdf4",
-          border: "1px solid #86efac",
-          borderRadius: 8,
-          padding: 16,
-          marginBottom: 16,
-        }}
-      >
-        <strong>✅ PUB-12: Login page complete</strong>
-        <p style={{ margin: "4px 0 0", fontSize: 14, color: "#166534" }}>
-          User is authenticated. Chat interface coming in PUB-22.
-        </p>
-      </div>
+      {/* Chat area */}
+      <ChatPage agentSlug={user.agentSlug} />
     </div>
   );
 }
