@@ -291,18 +291,18 @@
 
 # EPIC-7 — Admin Integration (gezytech dashboard)
 
-## Issue PUB-60 — Admin panel: tool & SOUL requests di gezytech dashboard
+## Issue PUB-60 — Admin panel: tool & SOUL requests di gezytech dashboard ✅ SELESAI
 
 - **Labels**: `P2`, `phase-2`, `frontend+backend`
 - **Estimate**: 3
 - **Depends-on**: PUB-40, PUB-50
 - **Tujuan**: Admin lihat + approve/reject tool/SOUL requests dari gezytech dashboard (atau public-app admin panel).
 - **Tugas**
-  - [ ] Baca dari public-app DB (atau public-app expose admin API)
-  - [ ] UI di admin.misal.com: list tool requests + SOUL requests
-  - [ ] Approve/reject button + admin note
-  - [ ] Tool approve → update agent toolbox di gezytech
-  - [ ] SOUL approve → update agent character di gezytech (link ke tab SOUL atau auto-apply)
+  - [x] Baca dari public-app DB (atau public-app expose admin API)
+  - [x] UI di admin.misal.com: list tool requests + SOUL requests
+  - [x] Approve/reject button + admin note
+  - [x] Tool approve → update agent toolbox di gezytech
+  - [x] SOUL approve → update agent character di gezytech (link ke tab SOUL atau auto-apply)
 - **Acceptance**: Admin bisa approve/reject dari dashboard, perubahan langsung apply ke agent
 
 ---
