@@ -2892,7 +2892,8 @@
       "list_skills": "Lister les competences",
       "enable_skill": "Activer une competence",
       "disable_skill": "Desactiver une competence",
-      "ocr_file": "OCR Fichier"
+      "ocr_file": "OCR Fichier",
+      "generate_xlsx": "Générer XLSX"
     },
     "renderers": {
       "rawJson": "JSON brut",

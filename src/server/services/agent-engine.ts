@@ -112,6 +112,10 @@ const PROTECTED_CORE_TOOLS = new Set<string>([
   // Image generation
   'generate_image',
   'list_image_models',
+  // Document generation
+  'generate_docx',
+  'generate_pdf',
+  'generate_xlsx',
 ])
 
 /**

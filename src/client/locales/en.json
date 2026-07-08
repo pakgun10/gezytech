@@ -2892,7 +2892,8 @@
       "list_skills": "List Skills",
       "enable_skill": "Enable Skill",
       "disable_skill": "Disable Skill",
-      "ocr_file": "OCR File"
+      "ocr_file": "OCR File",
+      "generate_xlsx": "Generate XLSX"
     },
     "renderers": {
       "rawJson": "Raw JSON",
