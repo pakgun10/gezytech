@@ -76,18 +76,19 @@ messageRoutes.get('/', async (c) => {
     return c.json({ error: { code: 'KIN_NOT_FOUND', message: 'Agent not found' } }, 404)
   }
   const before = c.req.query('before')
+  const after = c.req.query('after')
   const limit = Math.min(Number(c.req.query('limit') ?? 50), 100)
 
   let query = db
     .select()
     .from(messages)
     .where(
-      before
+      (before || after)
         ? and(
             eq(messages.agentId, agentId),
             isNull(messages.taskId),
             isNull(messages.sessionId),
-            lt(messages.id, before),
+            before ? lt(messages.id, before) : gt(messages.id, after),
           )
         : and(eq(messages.agentId, agentId), isNull(messages.taskId), isNull(messages.sessionId)),
     )
