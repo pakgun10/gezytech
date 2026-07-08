@@ -1,0 +1,186 @@
+---
+// Localized /tour page: a guided gallery of real product screenshots from a
+// seeded demo instance, grouped by theme, with a click-to-zoom lightbox.
+// Images live in public/screenshots/tour/<slug>.webp (desktop 16:10, mobile
+// 390:844); strings come from the locale dict (t.tour.*).
+import Base from '../../layouts/Base.astro';
+import { Icon } from 'astro-icon/components';
+import LangSwitcher from '../LangSwitcher.astro';
+import Footer from '../Footer.astro';
+import { getDict, localePath, type Locale } from '../../i18n';
+
+interface Props {
+  lang: Locale;
+}
+const { lang } = Astro.props;
+const t = getDict(lang);
+const tt = t.tour;
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const homeHref = `${base}${localePath(lang, '/')}`;
+const installHref = `${base}${localePath(lang, '/install')}`;
+const img = (slug: string) => `${base}/screenshots/tour/${slug}.webp`;
+
+// Gallery manifest: group -> shot slugs (each slug has {t,d} in the dict).
+// `mobile: true` renders in the narrow portrait grid.
+const GROUPS: { id: keyof typeof tt.groups; icon: string; shots: { slug: keyof typeof tt.shots; mobile?: boolean; wide?: boolean }[] }[] = [
+  {
+    id: 'chat', icon: 'lucide:messages-square',
+    shots: [
+      { slug: 'chat-briefing', wide: true },
+      { slug: 'chat-channel' },
+      { slug: 'chat-mealplan' },
+      { slug: 'chat-digest' },
+      { slug: 'chat-budget' },
+      { slug: 'chat-onboarding' },
+      { slug: 'chat-tools' },
+      { slug: 'composer' },
+      { slug: 'notifications' },
+    ],
+  },
+  {
+    id: 'trust', icon: 'lucide:shield-check',
+    shots: [
+      { slug: 'secret-popup', wide: true },
+      { slug: 'secret-pending' },
+      { slug: 'context-viewer' },
+      { slug: 'vault' },
+      { slug: 'token-usage' },
+    ],
+  },
+  {
+    id: 'build', icon: 'lucide:hammer',
+    shots: [
+      { slug: 'miniapps', wide: true },
+      { slug: 'miniapp-timer' },
+      { slug: 'miniapp-dashboard' },
+      { slug: 'miniapp-chat' },
+      { slug: 'custom-tools' },
+      { slug: 'files' },
+      { slug: 'terminal' },
+      { slug: 'toolboxes' },
+    ],
+  },
+  {
+    id: 'organize', icon: 'lucide:kanban',
+    shots: [
+      { slug: 'kanban', wide: true },
+      { slug: 'ticket' },
+      { slug: 'knowledge' },
+      { slug: 'tasks' },
+      { slug: 'crons' },
+      { slug: 'webhooks' },
+    ],
+  },
+  {
+    id: 'control', icon: 'lucide:sliders-horizontal',
+    shots: [
+      { slug: 'providers' },
+      { slug: 'models' },
+      { slug: 'channels' },
+      { slug: 'contacts' },
+      { slug: 'memories' },
+      { slug: 'users' },
+    ],
+  },
+  {
+    id: 'anywhere', icon: 'lucide:smartphone',
+    shots: [
+      { slug: 'palettes' },
+      { slug: 'palette-variant' },
+      { slug: 'mobile-chat', mobile: true },
+      { slug: 'mobile-sidebar', mobile: true },
+      { slug: 'mobile-miniapp', mobile: true },
+    ],
+  },
+];
+---
+<Base lang={lang} title={tt.meta.title} description={tt.meta.description}>
+  <!-- ===== top bar ===== -->
+  <header class="topbar"><div class="wrap in">
+    <a class="brand" href={homeHref}><img class="brand-logo" src={`${base}/logo.svg`} width="28" height="28" alt="" /> Hivekeep</a>
+    <nav>
+      <a href={`${homeHref}#memory`}>{t.nav.features}</a><a href={`${homeHref}#household`}>{t.nav.household}</a>
+      <a href={`${homeHref}#why`}>{t.nav.why}</a>
+      <a href="https://github.com/MarlBurroW/hivekeep">{t.nav.github}</a>
+    </nav>
+    <div class="nav-actions">
+      <LangSwitcher lang={lang} path="/tour" />
+      <a class="btn btn-primary btn-sm" href={installHref}>{t.nav.getStarted}</a>
+    </div>
+  </div></header>
+
+  <div class="wrap">
+    <!-- ===== head ===== -->
+    <div class="install-head">
+      <span class="kicker" style="justify-content:center">{tt.kicker}</span>
+      <h1 class="display">{tt.heading}</h1>
+      <p>{tt.sub}</p>
+      <p class="tour-hint mono"><Icon name="lucide:zoom-in" /> {tt.hint}</p>
+    </div>
+
+    <!-- ===== groups ===== -->
+    {GROUPS.map((g) => (
+      <section class="tour-group">
+        <div class="tg-head">
+          <span class="tg-ic"><Icon name={g.icon} /></span>
+          <div>
+            <h2 class="display">{tt.groups[g.id].title}</h2>
+            <p>{tt.groups[g.id].sub}</p>
+          </div>
+        </div>
+        <div class="tg-grid">
+          {g.shots.map(({ slug, mobile, wide }) => (
+            <figure class={`tshot${mobile ? ' is-mobile' : ''}${wide ? ' is-wide' : ''}`}>
+              <div class="tshot-frame">
+                <img src={img(slug)} alt={tt.shots[slug].t} loading="lazy" decoding="async" />
+              </div>
+              <figcaption>
+                <b>{tt.shots[slug].t}</b>
+                <span>{tt.shots[slug].d}</span>
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      </section>
+    ))}
+
+    <!-- ===== cta ===== -->
+    <div class="tour-cta">
+      <h2 class="display">{tt.cta.heading}</h2>
+      <p>{tt.cta.p}</p>
+      <a class="btn btn-primary" href={installHref}><Icon name="lucide:terminal" /> {tt.cta.button}</a>
+    </div>
+  </div>
+
+  <!-- ===== footer ===== -->
+  <Footer lang={lang} path="/tour" />
+
+  <!-- lightbox (same pattern as the home screenshots) -->
+  <div class="lightbox" id="lightbox" aria-hidden="true" role="dialog" aria-modal="true">
+    <img alt="" />
+  </div>
+  <script>
+    const lb = document.getElementById('lightbox')
+    const lbImg = lb?.querySelector('img')
+    if (lb && lbImg) {
+      const open = (img: HTMLImageElement) => {
+        lbImg.src = img.src
+        lbImg.alt = img.alt
+        lb.classList.add('open')
+        lb.setAttribute('aria-hidden', 'false')
+        document.body.style.overflow = 'hidden'
+      }
+      const close = () => {
+        lb.classList.remove('open')
+        lb.setAttribute('aria-hidden', 'true')
+        document.body.style.overflow = ''
+      }
+      document.querySelectorAll<HTMLImageElement>('.tshot-frame img').forEach((img) => {
+        img.addEventListener('click', () => open(img))
+      })
+      lb.addEventListener('click', close)
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close() })
+    }
+  </script>
+</Base>

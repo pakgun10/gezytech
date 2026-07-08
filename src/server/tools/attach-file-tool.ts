@@ -1,0 +1,155 @@
+import { z } from 'zod'
+import { tool } from '@/server/tools/tool-helper'
+import { createLogger } from '@/server/logger'
+import type { ToolRegistration } from '@/server/tools/types'
+import type { OutboundAttachment } from '@/server/channels/adapter'
+import { existsSync } from 'fs'
+import { resolve, basename, extname } from 'path'
+import { db } from '@/server/db/index'
+import { fileStorage } from '@/server/db/schema'
+import { eq } from 'drizzle-orm'
+
+/** Simple MIME type lookup from file extension */
+function guessMimeType(filename: string): string {
+  const ext = extname(filename).toLowerCase()
+  const map: Record<string, string> = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+    '.pdf': 'application/pdf', '.json': 'application/json',
+    '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv',
+    '.html': 'text/html', '.xml': 'application/xml',
+    '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
+    '.mp4': 'video/mp4', '.webm': 'video/webm',
+    '.zip': 'application/zip', '.tar': 'application/x-tar',
+    '.gz': 'application/gzip',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  }
+  return map[ext] || 'application/octet-stream'
+}
+
+const log = createLogger('tools:attach-file')
+
+// ─── Pending attachments store (per Agent, cleared after response delivery) ───
+
+const pendingAttachments = new Map<string, OutboundAttachment[]>()
+
+/**
+ * Stage an attachment for the current Agent response.
+ * Called by the attach_file tool during a turn.
+ */
+export function stageAttachment(agentId: string, att: OutboundAttachment): void {
+  const existing = pendingAttachments.get(agentId) ?? []
+  existing.push(att)
+  pendingAttachments.set(agentId, existing)
+}
+
+/**
+ * Pop all staged attachments for an Agent (consumes them).
+ * Called by deliverChannelResponse after the turn completes.
+ */
+export function popStagedAttachments(agentId: string): OutboundAttachment[] {
+  const atts = pendingAttachments.get(agentId) ?? []
+  pendingAttachments.delete(agentId)
+  return atts
+}
+
+/**
+ * Clear staged attachments without returning them (e.g. on error/abort).
+ */
+export function clearStagedAttachments(agentId: string): void {
+  pendingAttachments.delete(agentId)
+}
+
+// ─── attach_file tool ───────────────────────────────────────────────────────
+
+export const attachFileTool: ToolRegistration = {
+  availability: ['main'],
+  create: (ctx) =>
+    tool({
+      description:
+        'Attach a file to your response for channel delivery (Telegram, Discord, etc.). Call before your text reply.',
+      inputSchema: z.object({
+        source: z.string().describe(
+          'Share URL (/s/<token>), internal path (/api/uploads/...), workspace path, or external https:// URL',
+        ),
+        mimeType: z.string().optional().describe('Auto-detected if omitted'),
+        fileName: z.string().optional().describe('Auto-derived if omitted'),
+      }),
+      execute: async ({ source, mimeType, fileName }) => {
+        log.debug({ agentId: ctx.agentId, source }, 'attach_file invoked')
+
+        let resolvedSource = source
+        let resolvedMime = mimeType
+
+        // If it's an internal API path, resolve to absolute local path
+        if (source.startsWith('/api/uploads/')) {
+          const localPath = resolve('data', source.replace(/^\/api\//, ''))
+          if (!existsSync(localPath)) {
+            return { error: `File not found at ${source}` }
+          }
+          resolvedSource = localPath
+        } else if (source.startsWith('/api/file-storage/')) {
+          // file-storage serves from data/file-storage/
+          const localPath = resolve('data', source.replace(/^\/api\//, ''))
+          if (!existsSync(localPath)) {
+            return { error: `File not found at ${source}` }
+          }
+          resolvedSource = localPath
+        } else if (source.startsWith('https://') || source.startsWith('http://')) {
+          // External URL — pass through as-is
+          resolvedSource = source
+        } else if (source.startsWith('/s/')) {
+          // File-storage share URL: /s/<token> -> resolve token to local file
+          const token = source.replace(/^\/s\//, '').split('?')[0]!.split('/')[0]!
+          const row = db.select().from(fileStorage).where(eq(fileStorage.accessToken, token)).get()
+          if (!row) {
+            return { error: 'File not found for share link ' + source }
+          }
+          // Check expiry
+          if (row.expiresAt && row.expiresAt.getTime() < Date.now()) {
+            return { error: 'This shared file has expired' }
+          }
+          if (!existsSync(row.storedPath)) {
+            return { error: 'File not found on disk: ' + row.originalName }
+          }
+          resolvedSource = row.storedPath
+          // Auto-fill mimeType and fileName from DB if not provided
+          if (!resolvedMime) resolvedMime = row.mimeType
+          if (!fileName) fileName = row.originalName
+        } else {
+          // Treat as workspace path — resolve relative to Agent workspace
+          const localPath = resolve('data/workspaces', ctx.agentId, source)
+          if (!existsSync(localPath)) {
+            return { error: `File not found in workspace: ${source}` }
+          }
+          resolvedSource = localPath
+        }
+
+        // Auto-detect MIME if not provided
+        if (!resolvedMime) {
+          const name = fileName || basename(resolvedSource)
+          resolvedMime = guessMimeType(name)
+        }
+
+        const attachment: OutboundAttachment = {
+          source: resolvedSource,
+          mimeType: resolvedMime,
+          fileName: fileName || basename(resolvedSource),
+        }
+
+        stageAttachment(ctx.agentId, attachment)
+
+        log.info({ agentId: ctx.agentId, fileName: attachment.fileName, mimeType: resolvedMime }, 'File staged for response')
+
+        return {
+          success: true,
+          message: `File "${attachment.fileName}" staged for delivery. It will be sent with your next response on the messaging platform.`,
+          fileName: attachment.fileName,
+          mimeType: resolvedMime,
+        }
+      },
+    }),
+}

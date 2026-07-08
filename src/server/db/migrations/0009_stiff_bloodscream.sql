@@ -1,0 +1,1 @@
+ALTER TABLE `kins` ADD `tool_config` text;

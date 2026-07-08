@@ -1,0 +1,109 @@
+name: 🔌 Provider Bug Report
+description: Report an issue with a specific AI provider integration
+title: "bug(provider): [PROVIDER] — "
+labels: ["bug", "provider"]
+body:
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      description: Which provider is affected?
+      options:
+        - Anthropic
+        - Anthropic (Claude Max / OAuth)
+        - OpenAI
+        - OpenAI (Codex CLI)
+        - Gemini
+        - Mistral AI
+        - Groq
+        - DeepSeek
+        - Together AI
+        - Fireworks AI
+        - OpenRouter
+        - Ollama
+        - Cohere
+        - xAI (Grok)
+        - Perplexity
+        - Voyage (embedding)
+        - Nomic (embedding)
+        - Jina AI (embedding/rerank)
+        - Brave Search
+        - Tavily (search)
+        - Serper (search)
+        - Replicate (image)
+        - Stability AI (image)
+        - fal.ai (image)
+        - Other / Plugin provider
+    validations:
+      required: true
+
+  - type: dropdown
+    id: capability
+    attributes:
+      label: Capability
+      description: Which capability is affected?
+      options:
+        - LLM (chat/completion)
+        - Embedding
+        - Image generation
+        - Search
+        - Rerank
+    validations:
+      required: true
+
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Issue type
+      description: What kind of problem?
+      options:
+        - Connection test fails
+        - Model listing fails or returns wrong models
+        - Chat/completion returns errors
+        - Streaming doesn't work
+        - Tool calling doesn't work
+        - Embedding fails
+        - Image generation fails
+        - Search fails
+        - Wrong token counting
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the issue in detail. Include any error messages you see.
+      placeholder: |
+        When I try to use Gemini for chat, I get...
+    validations:
+      required: true
+
+  - type: textarea
+    id: model
+    attributes:
+      label: Model used
+      description: Which specific model were you using?
+      placeholder: e.g. gemini-2.0-flash, gpt-4o, llama-3.1-70b
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Any error logs from the Hivekeep console or browser dev tools.
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Hivekeep version
+      placeholder: e.g. v0.34.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else? (OS, Docker vs bare metal, proxy setup, etc.)

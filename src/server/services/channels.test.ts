@@ -1,0 +1,475 @@
+import { describe, it, expect, beforeEach, mock } from 'bun:test'
+
+// ─── Prevent Bun mock isolation leak ─────────────────────────────────────────
+// contacts.test.ts mocks @/server/services/contacts via mock.module().
+// Between test files, Bun tries to resolve the real module, which imports
+// `sqlite` from @/server/db/index (globally mocked by onboarding.test.ts).
+// This causes a "SyntaxError: Export named 'replaceContactIdentifiers' not found".
+// Adding a stub mock here prevents Bun from resolving the real contacts module.
+mock.module('@/server/services/contacts', () => ({
+  createContact: async () => null,
+  getContact: async () => null,
+  listContacts: async () => [],
+  listContactsWithDetails: async () => [],
+  getContactWithDetails: async () => null,
+  updateContact: async () => null,
+  deleteContact: async () => false,
+  searchContacts: async () => [],
+  addContactIdentifier: () => null,
+  updateContactIdentifier: () => null,
+  removeContactIdentifier: () => false,
+  replaceContactIdentifiers: () => null,
+  findContactByIdentifier: () => null,
+  findContactByLinkedUserId: () => null,
+  listContactIdentifiers: () => [],
+  setContactNote: () => null,
+  updateContactNote: () => null,
+  deleteContactNote: () => false,
+  getVisibleNotes: () => [],
+  deleteNotesByAgent: () => {},
+  listContactsForPrompt: async () => [],
+  ensureUserContactsExist: async () => {},
+}))
+
+// ─── Re-implement the in-memory stores locally to test the contract ──────────
+// Bun's mock.module is global and other test files mock @/server/services/channels,
+// which corrupts the real module's Map. Instead, we replicate the logic here and
+// test it in isolation — ensuring the contract is verified without cross-test pollution.
+
+// ─── ChannelQueueMeta ────────────────────────────────────────────────────────
+
+interface ChannelQueueMeta {
+  channelId: string
+  platformChatId: string
+  platformMessageId: string
+  platformUserId: string
+}
+
+function createQueueMetaStore() {
+  const store = new Map<string, ChannelQueueMeta>()
+  return {
+    set: (id: string, meta: ChannelQueueMeta) => store.set(id, meta),
+    get: (id: string) => store.get(id),
+    pop: (id: string) => {
+      const meta = store.get(id)
+      if (meta) store.delete(id)
+      return meta
+    },
+    clear: () => store.clear(),
+  }
+}
+
+describe('ChannelQueueMeta contract', () => {
+  const store = createQueueMetaStore()
+  let idCounter = 0
+  const nextId = () => `test-queue-${Date.now()}-${++idCounter}`
+
+  const sampleMeta: ChannelQueueMeta = {
+    channelId: 'ch-001',
+    platformChatId: 'chat-123',
+    platformMessageId: 'msg-456',
+    platformUserId: 'user-789',
+  }
+
+  beforeEach(() => store.clear())
+
+  describe('set + get', () => {
+    it('stores and retrieves metadata by queue item ID', () => {
+      const id = nextId()
+      store.set(id, sampleMeta)
+      expect(store.get(id)).toEqual(sampleMeta)
+    })
+
+    it('returns undefined for unknown queue item ID', () => {
+      expect(store.get('nonexistent-id')).toBeUndefined()
+    })
+
+    it('overwrites existing metadata when set again', () => {
+      const id = nextId()
+      store.set(id, sampleMeta)
+      const updated: ChannelQueueMeta = { ...sampleMeta, channelId: 'ch-002' }
+      store.set(id, updated)
+      expect(store.get(id)).toEqual(updated)
+    })
+
+    it('stores multiple entries independently', () => {
+      const id1 = nextId()
+      const id2 = nextId()
+      const meta1: ChannelQueueMeta = { ...sampleMeta, channelId: 'ch-a' }
+      const meta2: ChannelQueueMeta = { ...sampleMeta, channelId: 'ch-b' }
+      store.set(id1, meta1)
+      store.set(id2, meta2)
+      expect(store.get(id1)).toEqual(meta1)
+      expect(store.get(id2)).toEqual(meta2)
+    })
+  })
+
+  describe('pop', () => {
+    it('returns and removes metadata', () => {
+      const id = nextId()
+      store.set(id, sampleMeta)
+      expect(store.pop(id)).toEqual(sampleMeta)
+      expect(store.get(id)).toBeUndefined()
+    })
+
+    it('returns undefined for unknown ID', () => {
+      expect(store.pop('nonexistent-pop')).toBeUndefined()
+    })
+
+    it('returns undefined on second pop (already consumed)', () => {
+      const id = nextId()
+      store.set(id, sampleMeta)
+      store.pop(id)
+      expect(store.pop(id)).toBeUndefined()
+    })
+
+    it('does not affect other entries when popping one', () => {
+      const id1 = nextId()
+      const id2 = nextId()
+      store.set(id1, { ...sampleMeta, channelId: 'ch-keep' })
+      store.set(id2, { ...sampleMeta, channelId: 'ch-pop' })
+      store.pop(id2)
+      expect(store.get(id1)?.channelId).toBe('ch-keep')
+      expect(store.get(id2)).toBeUndefined()
+    })
+  })
+})
+
+// ─── ChannelOriginMeta (with TTL) ───────────────────────────────────────────
+
+interface ChannelOriginMeta {
+  channelId: string
+  platformChatId: string
+  platformMessageId: string
+  platformUserId: string
+  createdAt: number
+  ttlMs: number
+}
+
+function createOriginMetaStore() {
+  const store = new Map<string, ChannelOriginMeta>()
+  return {
+    set: (id: string, meta: ChannelOriginMeta) => store.set(id, meta),
+    get: (id: string, now?: number): ChannelOriginMeta | undefined => {
+      const meta = store.get(id)
+      if (!meta) return undefined
+      if ((now ?? Date.now()) - meta.createdAt > meta.ttlMs) {
+        store.delete(id)
+        return undefined
+      }
+      return meta
+    },
+    clear: () => store.clear(),
+  }
+}
+
+describe('ChannelOriginMeta contract', () => {
+  const store = createOriginMetaStore()
+  let idCounter = 0
+  const nextId = () => `test-origin-${Date.now()}-${++idCounter}`
+
+  const makeMeta = (overrides?: Partial<ChannelOriginMeta>): ChannelOriginMeta => ({
+    channelId: 'ch-origin-001',
+    platformChatId: 'chat-origin-123',
+    platformMessageId: 'msg-origin-456',
+    platformUserId: 'user-origin-789',
+    createdAt: Date.now(),
+    ttlMs: 60_000,
+    ...overrides,
+  })
+
+  beforeEach(() => store.clear())
+
+  describe('set + get', () => {
+    it('stores and retrieves origin metadata', () => {
+      const id = nextId()
+      const meta = makeMeta()
+      store.set(id, meta)
+      expect(store.get(id)).toEqual(meta)
+    })
+
+    it('returns undefined for unknown origin ID', () => {
+      expect(store.get('nonexistent-origin')).toBeUndefined()
+    })
+
+    it('overwrites existing origin metadata', () => {
+      const id = nextId()
+      store.set(id, makeMeta({ channelId: 'ch-old' }))
+      store.set(id, makeMeta({ channelId: 'ch-new' }))
+      expect(store.get(id)?.channelId).toBe('ch-new')
+    })
+
+    it('stores multiple origin entries independently', () => {
+      const id1 = nextId()
+      const id2 = nextId()
+      store.set(id1, makeMeta({ channelId: 'ch-a' }))
+      store.set(id2, makeMeta({ channelId: 'ch-b' }))
+      expect(store.get(id1)?.channelId).toBe('ch-a')
+      expect(store.get(id2)?.channelId).toBe('ch-b')
+    })
+
+    it('preserves all fields in the returned metadata', () => {
+      const id = nextId()
+      const meta: ChannelOriginMeta = {
+        channelId: 'ch-full',
+        platformChatId: 'pchat-123',
+        platformMessageId: 'pmsg-456',
+        platformUserId: 'puser-789',
+        createdAt: Date.now(),
+        ttlMs: 300_000,
+      }
+      store.set(id, meta)
+      const result = store.get(id)!
+      expect(result.channelId).toBe('ch-full')
+      expect(result.platformChatId).toBe('pchat-123')
+      expect(result.platformMessageId).toBe('pmsg-456')
+      expect(result.platformUserId).toBe('puser-789')
+      expect(result.ttlMs).toBe(300_000)
+    })
+  })
+
+  describe('TTL expiry', () => {
+    it('returns metadata when within TTL', () => {
+      const id = nextId()
+      const now = 1000000
+      const meta = makeMeta({ createdAt: now - 30_000, ttlMs: 60_000 })
+      store.set(id, meta)
+      expect(store.get(id, now)).toEqual(meta)
+    })
+
+    it('returns undefined and cleans up when TTL has expired', () => {
+      const id = nextId()
+      const now = 1000000
+      const meta = makeMeta({ createdAt: now - 120_000, ttlMs: 60_000 })
+      store.set(id, meta)
+      expect(store.get(id, now)).toBeUndefined()
+      // Entry should be deleted
+      expect(store.get(id, now)).toBeUndefined()
+    })
+
+    it('returns undefined when TTL is exactly elapsed', () => {
+      const id = nextId()
+      const now = 1000000
+      const meta = makeMeta({ createdAt: now - 60_001, ttlMs: 60_000 })
+      store.set(id, meta)
+      expect(store.get(id, now)).toBeUndefined()
+    })
+
+    it('returns metadata when TTL has not quite elapsed', () => {
+      const id = nextId()
+      const now = 1000000
+      const meta = makeMeta({ createdAt: now - 59_999, ttlMs: 60_000 })
+      store.set(id, meta)
+      expect(store.get(id, now)).toEqual(meta)
+    })
+
+    it('handles zero TTL (expires immediately)', () => {
+      const id = nextId()
+      const now = 1000000
+      const meta = makeMeta({ createdAt: now - 1, ttlMs: 0 })
+      store.set(id, meta)
+      expect(store.get(id, now)).toBeUndefined()
+    })
+
+    it('does not expire other entries when one expires', () => {
+      const id1 = nextId()
+      const id2 = nextId()
+      const now = 1000000
+
+      store.set(id1, makeMeta({ channelId: 'ch-expired', createdAt: now - 120_000, ttlMs: 60_000 }))
+      store.set(id2, makeMeta({ channelId: 'ch-fresh', createdAt: now, ttlMs: 60_000 }))
+
+      expect(store.get(id1, now)).toBeUndefined()
+      expect(store.get(id2, now)?.channelId).toBe('ch-fresh')
+    })
+
+    it('handles very large TTL values', () => {
+      const id = nextId()
+      const now = 1000000
+      const meta = makeMeta({ createdAt: now - 86_400_000, ttlMs: 86_400_000 * 7 })
+      store.set(id, meta)
+      expect(store.get(id, now)).toEqual(meta)
+    })
+
+    it('correctly expires after multiple gets (idempotent delete)', () => {
+      const id = nextId()
+      const now = 1000000
+      store.set(id, makeMeta({ createdAt: now - 120_000, ttlMs: 60_000 }))
+
+      // Multiple gets all return undefined
+      expect(store.get(id, now)).toBeUndefined()
+      expect(store.get(id, now)).toBeUndefined()
+      expect(store.get(id, now)).toBeUndefined()
+    })
+
+    it('entry accessible before TTL, then expired after TTL', () => {
+      const id = nextId()
+      const createdAt = 500_000
+      store.set(id, makeMeta({ createdAt, ttlMs: 60_000 }))
+
+      // Before TTL (30s later)
+      expect(store.get(id, createdAt + 30_000)).toBeDefined()
+
+      // After TTL (120s later)
+      expect(store.get(id, createdAt + 120_000)).toBeUndefined()
+    })
+
+    it('boundary: elapsed equals ttlMs exactly (not expired)', () => {
+      const id = nextId()
+      const now = 1000000
+      // elapsed = now - createdAt = 60000, ttlMs = 60000
+      // Condition: elapsed > ttlMs → 60000 > 60000 → false → NOT expired
+      const meta = makeMeta({ createdAt: now - 60_000, ttlMs: 60_000 })
+      store.set(id, meta)
+      expect(store.get(id, now)).toEqual(meta)
+    })
+  })
+})
+
+// ─── Delivery-status context line ────────────────────────────────────────────
+// Replicates buildDeliveryContextLine() from channels.ts (kept in lockstep) to
+// verify the visible delivery hint without importing the real module, which
+// other test files mock globally (see header note). The icon/label/error-code
+// formatting is the user-facing contract for Twilio MessageStatus callbacks.
+
+const DELIVERY_STATUS_LABELS: Record<string, Partial<Record<string, string>>> = {
+  en: { delivered: 'Delivered', sent: 'Sent', queued: 'Queued', read: 'Read', undelivered: 'Delivery failed', failed: 'Delivery failed' },
+  fr: { delivered: 'Remis', sent: 'Envoyé', queued: 'En file d’attente', read: 'Lu', undelivered: 'Échec de remise', failed: 'Échec de remise' },
+}
+
+function buildDeliveryContextLine(
+  update: { status: string; errorCode?: string },
+  platformName: string,
+  locale: string,
+): string {
+  const lang = (locale || 'en').slice(0, 2).toLowerCase()
+  const labels = DELIVERY_STATUS_LABELS[lang] ?? DELIVERY_STATUS_LABELS.en ?? {}
+  const label = labels[update.status] ?? update.status
+  const isFailure = update.status === 'failed' || update.status === 'undelivered'
+  const isSuccess = update.status === 'delivered' || update.status === 'read'
+  const icon = isFailure ? '✗ ' : isSuccess ? '✓ ' : ''
+  const errorSuffix = isFailure && update.errorCode ? ` (${update.errorCode})` : ''
+  return `${icon}${label}${errorSuffix} · ${platformName}`
+}
+
+describe('buildDeliveryContextLine contract', () => {
+  it('prefixes a check on delivered', () => {
+    expect(buildDeliveryContextLine({ status: 'delivered' }, 'Twilio SMS', 'en')).toBe('✓ Delivered · Twilio SMS')
+  })
+
+  it('prefixes a cross and appends the error code on failure', () => {
+    expect(buildDeliveryContextLine({ status: 'failed', errorCode: '30007' }, 'Twilio SMS', 'en')).toBe(
+      '✗ Delivery failed (30007) · Twilio SMS',
+    )
+  })
+
+  it('treats undelivered as a failure (cross + error code)', () => {
+    expect(buildDeliveryContextLine({ status: 'undelivered', errorCode: '30006' }, 'Twilio SMS', 'en')).toBe(
+      '✗ Delivery failed (30006) · Twilio SMS',
+    )
+  })
+
+  it('omits the error suffix when no code is present', () => {
+    expect(buildDeliveryContextLine({ status: 'failed' }, 'Twilio SMS', 'en')).toBe('✗ Delivery failed · Twilio SMS')
+  })
+
+  it('uses no icon for in-flight states (sent/queued)', () => {
+    expect(buildDeliveryContextLine({ status: 'sent' }, 'Twilio SMS', 'en')).toBe('Sent · Twilio SMS')
+    expect(buildDeliveryContextLine({ status: 'queued' }, 'Twilio SMS', 'en')).toBe('Queued · Twilio SMS')
+  })
+
+  it('localizes by the channel locale (fr)', () => {
+    expect(buildDeliveryContextLine({ status: 'delivered' }, 'Twilio SMS', 'fr')).toBe('✓ Remis · Twilio SMS')
+  })
+
+  it('falls back to English for an unknown locale', () => {
+    expect(buildDeliveryContextLine({ status: 'delivered' }, 'Twilio SMS', 'pt')).toBe('✓ Delivered · Twilio SMS')
+  })
+
+  it('falls back to the raw status for an unmapped status', () => {
+    expect(buildDeliveryContextLine({ status: 'unknown' }, 'Twilio SMS', 'en')).toBe('unknown · Twilio SMS')
+  })
+})
+
+// ─── Pending-message buffer cap ──────────────────────────────────────────────
+// Mirrors the cap trimming in bufferPendingChannelMessage() (channels.ts): when
+// a pending contact accumulates more than maxPendingBufferedMessages, only the
+// most recent N are kept (oldest dropped) so the replay turn stays bounded.
+
+function trimToCap<T>(buffer: T[], cap: number): T[] {
+  // Buffer is ordered oldest → newest. Drop the oldest overflow.
+  if (buffer.length <= cap) return buffer
+  return buffer.slice(buffer.length - cap)
+}
+
+describe('pending buffer cap contract', () => {
+  it('keeps everything when under the cap', () => {
+    expect(trimToCap([1, 2, 3], 10)).toEqual([1, 2, 3])
+  })
+
+  it('keeps everything when exactly at the cap', () => {
+    expect(trimToCap([1, 2, 3], 3)).toEqual([1, 2, 3])
+  })
+
+  it('drops the oldest when over the cap (keeps most recent N)', () => {
+    expect(trimToCap([1, 2, 3, 4, 5], 3)).toEqual([3, 4, 5])
+  })
+
+  it('keeps only the last message with a cap of 1', () => {
+    expect(trimToCap(['a', 'b', 'c'], 1)).toEqual(['c'])
+  })
+})
+
+// ─── Grouped channel-turn content ────────────────────────────────────────────
+// Mirrors the content builder in enqueueChannelTurn() (channels.ts): the sender
+// prefix is emitted once, then every non-empty message body is joined by
+// newlines so an approved contact's backlog becomes a single turn. An
+// unresolved contact carries platform metadata in the prefix instead.
+
+function buildChannelTurnContent(
+  platform: string,
+  senderName: string,
+  contactResolved: boolean,
+  messages: { content: string; platformUserId: string; platformUsername?: string }[],
+): string {
+  const first = messages[0]!
+  const head = contactResolved
+    ? `[${platform}:${senderName}]`
+    : (() => {
+        const parts = [`${platform}_id: ${first.platformUserId}`]
+        if (first.platformUsername) parts.push(`username: ${first.platformUsername}`)
+        return `[${platform}:${senderName} (unknown, ${parts.join(', ')})]`
+      })()
+  const bodies = messages.map((m) => m.content).filter((c) => c && c.trim().length > 0)
+  return bodies.length > 0 ? `${head} ${bodies.join('\n')}` : head
+}
+
+describe('grouped channel-turn content contract', () => {
+  const msg = (content: string) => ({ content, platformUserId: 'u1', platformUsername: 'bob' })
+
+  it('formats a single resolved-contact message', () => {
+    expect(buildChannelTurnContent('whatsapp', 'Bob', true, [msg('hello')])).toBe('[whatsapp:Bob] hello')
+  })
+
+  it('joins multiple buffered messages into one turn with a single prefix', () => {
+    expect(
+      buildChannelTurnContent('whatsapp', 'Bob', true, [msg('one'), msg('two'), msg('three')]),
+    ).toBe('[whatsapp:Bob] one\ntwo\nthree')
+  })
+
+  it('skips empty/whitespace bodies when joining', () => {
+    expect(buildChannelTurnContent('whatsapp', 'Bob', true, [msg('one'), msg('   '), msg('two')])).toBe(
+      '[whatsapp:Bob] one\ntwo',
+    )
+  })
+
+  it('embeds platform metadata in the prefix for an unresolved contact', () => {
+    expect(buildChannelTurnContent('telegram', 'Stranger', false, [msg('hi')])).toBe(
+      '[telegram:Stranger (unknown, telegram_id: u1, username: bob)] hi',
+    )
+  })
+
+  it('emits just the prefix when there is no text (attachment-only)', () => {
+    expect(buildChannelTurnContent('whatsapp', 'Bob', true, [msg('')])).toBe('[whatsapp:Bob]')
+  })
+})

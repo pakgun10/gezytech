@@ -1,0 +1,538 @@
+import { eq, desc, lt, and, notInArray, sql, count } from 'drizzle-orm'
+import { v4 as uuid } from 'uuid'
+import { randomBytes, timingSafeEqual } from 'crypto'
+import { db } from '@/server/db/index'
+import { createLogger } from '@/server/logger'
+import { webhooks, webhookLogs, agents } from '@/server/db/schema'
+import { enqueueMessage } from '@/server/services/queue'
+import { spawnTask } from '@/server/services/tasks'
+import { sseManager } from '@/server/sse/index'
+import { config } from '@/server/config'
+
+const log = createLogger('webhooks')
+
+// ─── Token helpers ──────────────────────────────────────────────────────────
+
+function generateToken(): string {
+  return randomBytes(32).toString('hex')
+}
+
+export function validateToken(provided: string, stored: string): boolean {
+  if (!provided || !stored) return false
+  const a = Buffer.from(provided, 'utf8')
+  const b = Buffer.from(stored, 'utf8')
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
+
+// ─── URL builder ────────────────────────────────────────────────────────────
+
+export function buildWebhookUrl(webhookId: string): string {
+  return `${config.publicUrl}/api/webhooks/incoming/${webhookId}`
+}
+
+// ─── CRUD ───────────────────────────────────────────────────────────────────
+
+interface CreateWebhookParams {
+  agentId: string
+  name: string
+  description?: string
+  createdBy: 'user' | 'agent'
+  filterMode?: string | null
+  filterField?: string | null
+  filterAllowedValues?: string | null
+  filterExpression?: string | null
+  dispatchMode?: 'conversation' | 'task'
+  taskTitleTemplate?: string | null
+  taskPromptTemplate?: string | null
+  maxConcurrentTasks?: number
+}
+
+export async function createWebhook(params: CreateWebhookParams) {
+  // Check max per Agent limit
+  const existing = await db
+    .select()
+    .from(webhooks)
+    .where(eq(webhooks.agentId, params.agentId))
+    .all()
+
+  if (existing.length >= config.webhooks.maxPerAgent) {
+    throw new Error(`Max webhooks per Agent (${config.webhooks.maxPerAgent}) reached`)
+  }
+
+  const id = uuid()
+  const token = generateToken()
+  const now = new Date()
+
+  await db.insert(webhooks).values({
+    id,
+    agentId: params.agentId,
+    name: params.name,
+    token,
+    description: params.description ?? null,
+    isActive: true,
+    triggerCount: 0,
+    filterMode: params.filterMode ?? null,
+    filterField: params.filterField ?? null,
+    filterAllowedValues: params.filterAllowedValues ?? null,
+    filterExpression: params.filterExpression ?? null,
+    dispatchMode: params.dispatchMode ?? 'conversation',
+    taskTitleTemplate: params.taskTitleTemplate ?? null,
+    taskPromptTemplate: params.taskPromptTemplate ?? null,
+    maxConcurrentTasks: params.maxConcurrentTasks ?? 1,
+    createdBy: params.createdBy,
+    createdAt: now,
+    updatedAt: now,
+  })
+
+  const created = await db.select().from(webhooks).where(eq(webhooks.id, id)).get()
+
+  if (created) {
+    sseManager.broadcast({
+      type: 'webhook:created',
+      agentId: created.agentId,
+      data: { webhookId: created.id, agentId: created.agentId },
+    })
+  }
+
+  log.info({ webhookId: id, agentId: params.agentId, name: params.name }, 'Webhook created')
+
+  // Return the full record including the token (only time it's exposed)
+  return { ...created!, token }
+}
+
+export async function updateWebhook(
+  webhookId: string,
+  updates: Partial<{
+    name: string
+    description: string | null
+    isActive: boolean
+    filterMode: string | null
+    filterField: string | null
+    filterAllowedValues: string | null
+    filterExpression: string | null
+    dispatchMode: string
+    taskTitleTemplate: string | null
+    taskPromptTemplate: string | null
+    maxConcurrentTasks: number
+  }>,
+) {
+  await db
+    .update(webhooks)
+    .set({ ...updates, updatedAt: new Date() })
+    .where(eq(webhooks.id, webhookId))
+
+  const updated = await db.select().from(webhooks).where(eq(webhooks.id, webhookId)).get()
+  if (!updated) return null
+
+  sseManager.broadcast({
+    type: 'webhook:updated',
+    agentId: updated.agentId,
+    data: { webhookId: updated.id, agentId: updated.agentId },
+  })
+
+  return updated
+}
+
+export async function deleteWebhook(webhookId: string) {
+  const existing = await db.select().from(webhooks).where(eq(webhooks.id, webhookId)).get()
+  await db.delete(webhooks).where(eq(webhooks.id, webhookId))
+
+  if (existing) {
+    sseManager.broadcast({
+      type: 'webhook:deleted',
+      agentId: existing.agentId,
+      data: { webhookId, agentId: existing.agentId },
+    })
+    log.info({ webhookId, agentId: existing.agentId }, 'Webhook deleted')
+  }
+}
+
+export async function getWebhook(webhookId: string) {
+  return db.select().from(webhooks).where(eq(webhooks.id, webhookId)).get()
+}
+
+export async function listWebhooks(agentId?: string) {
+  if (agentId) {
+    return db.select().from(webhooks).where(eq(webhooks.agentId, agentId)).all()
+  }
+  return db.select().from(webhooks).all()
+}
+
+export async function regenerateToken(webhookId: string) {
+  const token = generateToken()
+
+  await db
+    .update(webhooks)
+    .set({ token, updatedAt: new Date() })
+    .where(eq(webhooks.id, webhookId))
+
+  const updated = await db.select().from(webhooks).where(eq(webhooks.id, webhookId)).get()
+  if (!updated) return null
+
+  sseManager.broadcast({
+    type: 'webhook:updated',
+    agentId: updated.agentId,
+    data: { webhookId: updated.id, agentId: updated.agentId },
+  })
+
+  log.info({ webhookId }, 'Webhook token regenerated')
+  return { token }
+}
+
+// ─── Filter ─────────────────────────────────────────────────────────────────
+
+const MAX_FILTER_EXPRESSION_LENGTH = 500
+
+interface FilterConfig {
+  filterMode: string | null
+  filterField: string | null
+  filterAllowedValues: string | null // raw JSON string from DB
+  filterExpression: string | null
+}
+
+interface FilterResult {
+  passed: boolean
+  extractedValue?: string | null
+  error?: string
+}
+
+function extractByPath(obj: unknown, path: string): unknown {
+  const parts = path.split('.')
+  let current: unknown = obj
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return undefined
+    current = (current as Record<string, unknown>)[part]
+  }
+  return current
+}
+
+export function evaluateFilter(config: FilterConfig, payload: string): FilterResult {
+  if (!config.filterMode) return { passed: true }
+
+  if (config.filterMode === 'simple') {
+    if (!config.filterField) return { passed: true }
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(payload)
+    } catch {
+      return { passed: false, error: 'non-json' }
+    }
+
+    const raw = extractByPath(parsed, config.filterField)
+    const extractedValue = raw == null ? null : String(raw)
+
+    let allowedValues: string[] = []
+    try {
+      allowedValues = config.filterAllowedValues ? JSON.parse(config.filterAllowedValues) : []
+    } catch {
+      return { passed: false, error: 'invalid-allowed-values' }
+    }
+
+    if (allowedValues.length === 0) {
+      return { passed: false, extractedValue }
+    }
+
+    if (extractedValue == null) {
+      return { passed: false, extractedValue: null }
+    }
+
+    const lowerValue = extractedValue.toLowerCase()
+    const passed = allowedValues.some((v) => v.toLowerCase() === lowerValue)
+    return { passed, extractedValue }
+  }
+
+  if (config.filterMode === 'advanced') {
+    if (!config.filterExpression) return { passed: true }
+    if (config.filterExpression.length > MAX_FILTER_EXPRESSION_LENGTH) {
+      return { passed: true, error: 'expression-too-long' }
+    }
+
+    try {
+      const regex = new RegExp(config.filterExpression)
+      return { passed: regex.test(payload) }
+    } catch {
+      return { passed: true, error: 'invalid-regex' }
+    }
+  }
+
+  return { passed: true }
+}
+
+// ─── Template resolution ─────────────────────────────────────────────────────
+
+export function resolveTemplate(template: string | null | undefined, payload: string): string | null {
+  if (!template) return null
+
+  let parsed: unknown = null
+  try {
+    parsed = JSON.parse(payload)
+  } catch {
+    // Non-JSON payload — only {{__payload__}} will resolve
+  }
+
+  return template.replace(/\{\{(.+?)\}\}/g, (_match, path: string) => {
+    const trimmed = path.trim()
+    if (trimmed === '__payload__') return payload
+    if (parsed == null) return ''
+    const value = extractByPath(parsed, trimmed)
+    if (value == null) return ''
+    if (typeof value === 'object') {
+      try { return JSON.stringify(value) } catch { return '' }
+    }
+    return String(value)
+  })
+}
+
+// ─── Field path extraction ───────────────────────────────────────────────────
+
+export function extractFieldPaths(obj: unknown, prefix = '', depth = 0): string[] {
+  if (depth > 5 || obj == null || typeof obj !== 'object' || Array.isArray(obj)) return []
+
+  const paths: string[] = []
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    const path = prefix ? `${prefix}.${key}` : key
+    paths.push(path)
+    if (value != null && typeof value === 'object' && !Array.isArray(value)) {
+      paths.push(...extractFieldPaths(value, path, depth + 1))
+    }
+    if (paths.length >= 100) break
+  }
+  return paths.slice(0, 100)
+}
+
+export async function getFilteredCount(webhookId: string): Promise<number> {
+  const result = db
+    .select({ value: count() })
+    .from(webhookLogs)
+    .where(and(eq(webhookLogs.webhookId, webhookId), eq(webhookLogs.filtered, true)))
+    .get()
+  return result?.value ?? 0
+}
+
+export async function getFilteredCounts(webhookIds: string[]): Promise<Record<string, number>> {
+  if (webhookIds.length === 0) return {}
+  const rows = db
+    .select({ webhookId: webhookLogs.webhookId, value: count() })
+    .from(webhookLogs)
+    .where(eq(webhookLogs.filtered, true))
+    .groupBy(webhookLogs.webhookId)
+    .all()
+  const map: Record<string, number> = {}
+  for (const row of rows) {
+    map[row.webhookId] = row.value
+  }
+  return map
+}
+
+// ─── Trigger ────────────────────────────────────────────────────────────────
+
+const MAX_LOG_PAYLOAD_BYTES = 524_288 // 512 KB
+
+export async function triggerWebhook(webhookId: string, payload: string, sourceIp?: string) {
+  const webhook = await db.select().from(webhooks).where(eq(webhooks.id, webhookId)).get()
+  if (!webhook || !webhook.isActive) return null
+
+  const now = new Date()
+  const logPayload = payload.length > MAX_LOG_PAYLOAD_BYTES ? payload.slice(0, MAX_LOG_PAYLOAD_BYTES) : payload || null
+
+  // Evaluate filter before enqueueing
+  const filterResult = evaluateFilter(webhook, payload)
+
+  if (!filterResult.passed) {
+    // Still increment counter and log (marked as filtered)
+    await db
+      .update(webhooks)
+      .set({
+        triggerCount: webhook.triggerCount + 1,
+        lastTriggeredAt: now,
+        updatedAt: now,
+      })
+      .where(eq(webhooks.id, webhookId))
+
+    await db.insert(webhookLogs).values({
+      id: uuid(),
+      webhookId,
+      payload: logPayload,
+      sourceIp: sourceIp ?? null,
+      filtered: true,
+      createdAt: now,
+    })
+
+    sseManager.sendToAgent(webhook.agentId, {
+      type: 'webhook:updated',
+      agentId: webhook.agentId,
+      data: { webhookId, agentId: webhook.agentId },
+    })
+
+    log.debug({ webhookId, webhookName: webhook.name }, 'Webhook payload filtered out')
+    return { filtered: true }
+  }
+
+  // Increment trigger count + update lastTriggeredAt
+  await db
+    .update(webhooks)
+    .set({
+      triggerCount: webhook.triggerCount + 1,
+      lastTriggeredAt: now,
+      updatedAt: now,
+    })
+    .where(eq(webhooks.id, webhookId))
+
+  // Insert trigger log (payload truncated to 10KB)
+  await db.insert(webhookLogs).values({
+    id: uuid(),
+    webhookId,
+    payload: logPayload,
+    sourceIp: sourceIp ?? null,
+    filtered: false,
+    createdAt: now,
+  })
+
+  // Dispatch based on mode
+  if (webhook.dispatchMode === 'task') {
+    return triggerWebhookAsTask(webhook, payload)
+  }
+
+  return triggerWebhookAsConversation(webhook, payload, webhookId)
+}
+
+async function triggerWebhookAsConversation(
+  webhook: typeof webhooks.$inferSelect,
+  payload: string,
+  webhookId: string,
+) {
+  const content = `[Webhook: ${webhook.name}]\n${payload}`
+
+  const { id: queueItemId } = await enqueueMessage({
+    agentId: webhook.agentId,
+    messageType: 'webhook',
+    content,
+    sourceType: 'webhook',
+    sourceId: webhookId,
+    priority: config.queue.agentPriority,
+  })
+
+  sseManager.sendToAgent(webhook.agentId, {
+    type: 'webhook:triggered',
+    agentId: webhook.agentId,
+    data: { webhookId: webhook.id, agentId: webhook.agentId, queueItemId },
+  })
+
+  log.info({ webhookId, agentId: webhook.agentId, webhookName: webhook.name }, 'Webhook triggered (conversation)')
+  return { queueItemId }
+}
+
+async function triggerWebhookAsTask(
+  webhook: typeof webhooks.$inferSelect,
+  payload: string,
+) {
+  const title = resolveTemplate(webhook.taskTitleTemplate, payload) ?? `Webhook: ${webhook.name}`
+  const description = resolveTemplate(webhook.taskPromptTemplate, payload) ?? payload
+
+  const { taskId, queued } = await spawnTask({
+    parentAgentId: webhook.agentId,
+    title,
+    description,
+    mode: 'async',
+    spawnType: 'self',
+    webhookId: webhook.id,
+    concurrencyGroup: `webhook:${webhook.id}`,
+    concurrencyMax: webhook.maxConcurrentTasks,
+  })
+
+  sseManager.sendToAgent(webhook.agentId, {
+    type: 'webhook:triggered',
+    agentId: webhook.agentId,
+    data: { webhookId: webhook.id, agentId: webhook.agentId, taskId, queued },
+  })
+
+  log.info(
+    { webhookId: webhook.id, agentId: webhook.agentId, webhookName: webhook.name, taskId, queued },
+    'Webhook triggered (task)',
+  )
+
+  return { taskId, queued }
+}
+
+// ─── Logs ────────────────────────────────────────────────────────────────────
+
+export async function getWebhookLogs(webhookId: string, limit = 50) {
+  return db
+    .select()
+    .from(webhookLogs)
+    .where(eq(webhookLogs.webhookId, webhookId))
+    .orderBy(desc(webhookLogs.createdAt))
+    .limit(limit)
+    .all()
+}
+
+// ─── Log cleanup ─────────────────────────────────────────────────────────────
+
+/**
+ * Prune webhook logs older than the configured retention period
+ * and enforce a per-webhook max log count.
+ */
+export async function pruneWebhookLogs(): Promise<void> {
+  const { logRetentionDays, maxLogsPerWebhook } = config.webhooks
+
+  // 1. Delete logs older than retention period
+  const cutoff = new Date(Date.now() - logRetentionDays * 24 * 60 * 60 * 1000)
+  db.delete(webhookLogs).where(lt(webhookLogs.createdAt, cutoff)).run()
+
+  // 2. Per-webhook cap: keep only the most recent N logs
+  const allWebhooks = await db.select({ id: webhooks.id }).from(webhooks).all()
+  for (const wh of allWebhooks) {
+    // Select IDs to keep (most recent N), delete everything else
+    const keepIds = db
+      .select({ id: webhookLogs.id })
+      .from(webhookLogs)
+      .where(eq(webhookLogs.webhookId, wh.id))
+      .orderBy(desc(webhookLogs.createdAt))
+      .limit(maxLogsPerWebhook)
+      .all()
+      .map((r) => r.id)
+
+    if (keepIds.length === maxLogsPerWebhook) {
+      // Only prune if we've hit the cap
+      db.delete(webhookLogs)
+        .where(
+          and(
+            eq(webhookLogs.webhookId, wh.id),
+            keepIds.length > 0
+              ? notInArray(webhookLogs.id, keepIds)
+              : undefined,
+          ),
+        )
+        .run()
+    }
+  }
+
+  log.info({ retentionDays: logRetentionDays, maxPerWebhook: maxLogsPerWebhook }, 'Webhook logs pruned')
+}
+
+let pruneInterval: ReturnType<typeof setInterval> | null = null
+
+/** Start periodic webhook log cleanup (runs every 6 hours). */
+export function startWebhookLogCleanup() {
+  if (pruneInterval) return
+  const intervalMs = 6 * 60 * 60 * 1000 // 6 hours
+
+  // Run once after 60s startup delay, then periodically
+  setTimeout(() => pruneWebhookLogs().catch((e) => log.error(e, 'Webhook log cleanup failed')), 60_000)
+
+  pruneInterval = setInterval(
+    () => pruneWebhookLogs().catch((e) => log.error(e, 'Webhook log cleanup failed')),
+    intervalMs,
+  )
+
+  log.info({ intervalHours: 6 }, 'Webhook log cleanup scheduled')
+}
+
+export function stopWebhookLogCleanup() {
+  if (pruneInterval) {
+    clearInterval(pruneInterval)
+    pruneInterval = null
+  }
+}

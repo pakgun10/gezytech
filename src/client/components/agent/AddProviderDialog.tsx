@@ -1,0 +1,730 @@
+import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Input } from '@/client/components/ui/input'
+import { PasswordInput } from '@/client/components/ui/password-input'
+import { Button } from '@/client/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/client/components/ui/select'
+import { Alert, AlertDescription } from '@/client/components/ui/alert'
+import { CheckCircle2, ExternalLink, Loader2, LogIn, RefreshCw } from 'lucide-react'
+import { FormDialog } from '@/client/components/common/FormDialog'
+import { FormField } from '@/client/components/common/FormField'
+import { ProviderIcon } from '@/client/components/common/ProviderIcon'
+import { api, getErrorMessage } from '@/client/lib/api'
+import { useProviderTypes } from '@/client/hooks/useProviderTypes'
+import { cn } from '@/client/lib/utils'
+import type { ProviderType } from '@/shared/types'
+
+/**
+ * Per-provider placeholder for the credentials-file input shown when the
+ * provider doesn't take an API key (auto-detected OAuth credentials). The
+ * configSchema-driven form rendering — planned in a later phase — will
+ * derive this from each LLMProvider's declared schema; for now we mirror
+ * what the backend providers expect.
+ */
+const CREDENTIALS_PATH_PLACEHOLDERS: Record<string, string> = {
+  'anthropic-oauth': '~/.claude/.credentials.json',
+  'openai-codex': '~/.codex/auth.json',
+}
+
+/**
+ * Subscription providers that support the in-app OAuth "Sign in" flow (PKCE),
+ * so a user with no CLI installed can still connect. Mirrors the server-side
+ * registry in `routes/provider-oauth.ts` (OAUTH_PROVIDERS). When sign-in is
+ * available the Add dialog offers a "Sign in" / "Credentials file" toggle.
+ */
+const SIGN_IN_PROVIDER_TYPES = new Set<string>(['anthropic-oauth', 'openai-codex'])
+
+/**
+ * Sign-in providers whose OAuth app redirects to a fixed loopback URL
+ * (`http://localhost:1455/...`) instead of showing the code on a page. That
+ * page fails to load when Hivekeep runs on a different machine — the code is in
+ * the browser's address bar, so we tell the user to paste the whole URL.
+ */
+const LOOPBACK_PASTE_TYPES = new Set<string>(['openai-codex'])
+
+/** Control-only config keys driven by the auth-mode toggle, never typed by the
+ *  user, so they're filtered out of the dynamic field list. */
+const HIDDEN_CONFIG_KEYS = new Set<string>(['authMode'])
+
+interface EditProvider {
+  id: string
+  name: string
+  type: string
+  /** Capabilities currently persisted on the row. Used in edit mode to
+   *  pre-tick the family picker so the user sees the actual state and
+   *  can add/remove families (e.g. enable TTS/STT on an existing
+   *  OpenAI row that was created before those capabilities existed). */
+  capabilities?: string[]
+}
+
+interface ProviderFormDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSaved: () => void
+  /** Pass a provider to enter edit mode */
+  provider?: EditProvider | null
+  /** Filter which provider types to show (defaults to all) */
+  providerTypes?: readonly string[]
+}
+
+export function ProviderFormDialog({ open, onOpenChange, onSaved, provider, providerTypes }: ProviderFormDialogProps) {
+  const { t } = useTranslation()
+  const isEditing = !!provider
+  const [isSaving, setIsSaving] = useState(false)
+  const [isTesting, setIsTesting] = useState(false)
+  const [testPassed, setTestPassed] = useState(false)
+  const [error, setError] = useState('')
+
+  // Live provider catalogue — built-ins + every plugin-contributed provider
+  // currently registered. Refreshes on plugin enable/disable SSE events.
+  const catalogue = useProviderTypes()
+
+  const types = providerTypes ?? catalogue.types
+  const defaultType = types[0] ?? catalogue.types[0] ?? ''
+  const [providerType, setProviderType] = useState<string>(defaultType)
+  const [providerName, setProviderName] = useState('')
+  /** Free-form per-field values, keyed by the provider's configSchema
+   *  field.key. Only fields the user actually touched end up in the
+   *  payload submitted to the server. */
+  const [configValues, setConfigValues] = useState<Record<string, string>>({})
+
+  // ─── In-app OAuth sign-in (CLI-free) ───────────────────────────────────────
+  // 'signin' uses the PKCE paste-code flow; 'cli' uses the credentials file.
+  const [authMode, setAuthMode] = useState<'signin' | 'cli'>('signin')
+  const [signInUrl, setSignInUrl] = useState('')
+  const [signInToken, setSignInToken] = useState('')
+  const [signInCode, setSignInCode] = useState('')
+  const [signInStatus, setSignInStatus] = useState<'idle' | 'starting' | 'awaiting' | 'connecting'>('idle')
+
+  const resetSignIn = () => {
+    setSignInUrl('')
+    setSignInToken('')
+    setSignInCode('')
+    setSignInStatus('idle')
+  }
+
+  // Reset config values when the selected type changes — each provider has
+  // its own configSchema with its own field names.
+  useEffect(() => {
+    setConfigValues({})
+    setTestPassed(false)
+    setError('')
+    setAuthMode('signin')
+    resetSignIn()
+  }, [providerType])
+
+  const configSchema = catalogue.configSchemas[providerType] ?? []
+
+  /** Returns the resolved config object (only non-empty fields). Used by
+   *  both the test-connection action and the save action. */
+  const buildConfig = (): Record<string, string> => {
+    const out: Record<string, string> = {}
+    if (configSchema.length > 0) {
+      for (const field of configSchema) {
+        const v = configValues[field.key]?.trim()
+        if (v) out[field.key] = v
+      }
+    } else {
+      // Defensive fallback for legacy providers with no declared schema —
+      // ship whatever the user typed under the conventional `apiKey` key.
+      const v = configValues.apiKey?.trim()
+      if (v) out.apiKey = v
+    }
+    return out
+  }
+  /** When the selected type advertises multiple families (LLM / Embeddings /
+   *  Images), the user picks which ones to actually create. Defaults to all
+   *  three on first render; reset to all whenever the type changes. */
+  const [selectedFamilies, setSelectedFamilies] = useState<readonly string[]>([])
+
+  // Populate form when editing
+  useEffect(() => {
+    if (open && provider) {
+      setProviderType(provider.type)
+      setProviderName(provider.name)
+      setConfigValues({})
+      setError('')
+      setTestPassed(false)
+
+      // Fetch the provider's non-secret config fields so the edit form
+      // can prefill them (custom-model lists, base URLs, …). Secret
+      // fields stay blank — the server strips them and the input shows
+      // its masked placeholder. The fetch is fire-and-forget; if it
+      // races against a fast close, the early-return guards prevent
+      // touching a stale form.
+      let cancelled = false
+      api
+        .get<{ provider: { safeConfig?: Record<string, unknown> } }>(`/providers/${provider.id}`)
+        .then((res) => {
+          if (cancelled) return
+          const safe = res.provider?.safeConfig
+          if (!safe) return
+          const prefill: Record<string, string> = {}
+          for (const [k, v] of Object.entries(safe)) {
+            if (typeof v === 'string') prefill[k] = v
+            else if (v != null) prefill[k] = String(v)
+          }
+          if (Object.keys(prefill).length > 0) {
+            setConfigValues((prev) => ({ ...prefill, ...prev }))
+          }
+        })
+        .catch(() => {
+          // Non-fatal: the form still works, the user just doesn't see
+          // their previously stored non-secret values. The Test/Save
+          // path still merges server-side.
+        })
+      return () => {
+        cancelled = true
+      }
+    } else if (open && !provider) {
+      resetForm()
+    }
+  }, [open, provider])
+
+  const resetForm = () => {
+    setProviderType(defaultType)
+    setProviderName('')
+    setConfigValues({})
+    setSelectedFamilies([])
+    setError('')
+    setTestPassed(false)
+    setIsTesting(false)
+    setIsSaving(false)
+    setAuthMode('signin')
+    resetSignIn()
+  }
+
+  const handleClose = () => {
+    resetForm()
+    onOpenChange(false)
+  }
+
+  const resetTest = () => {
+    setTestPassed(false)
+    setError('')
+  }
+
+  const getCapabilitiesForType = (type: string): readonly string[] => {
+    return catalogue.capabilities[type] ?? []
+  }
+
+  const isApiKeyOptional = catalogue.withoutApiKey.includes(providerType)
+  const hasOptionalApiKey = catalogue.withOptionalApiKey.includes(providerType)
+  const apiKeyUrl = catalogue.apiKeyUrls[providerType]
+
+  // Sign-in is only offered when creating a row for a sign-in-capable type.
+  const supportsSignIn = !isEditing && SIGN_IN_PROVIDER_TYPES.has(providerType)
+  const inSignInMode = supportsSignIn && authMode === 'signin'
+  const isLoopbackPaste = LOOPBACK_PASTE_TYPES.has(providerType)
+  const providerDisplayName = catalogue.displayNames[providerType] ?? providerType
+
+  const handleStartSignIn = async () => {
+    setError('')
+    setSignInStatus('starting')
+    try {
+      const res = await api.post<{ authUrl: string; state: string }>(
+        `/providers/oauth/${providerType}/start`,
+      )
+      setSignInToken(res.state)
+      setSignInUrl(res.authUrl)
+      setSignInStatus('awaiting')
+      window.open(res.authUrl, '_blank', 'noopener,noreferrer')
+    } catch (err: unknown) {
+      setError(getErrorMessage(err) || t('onboarding.providers.testFailed'))
+      setSignInStatus('idle')
+    }
+  }
+
+  const handleCompleteSignIn = async () => {
+    if (!signInCode.trim() || !signInToken) return
+    setError('')
+    setSignInStatus('connecting')
+    try {
+      await api.post(`/providers/oauth/${providerType}/complete`, {
+        state: signInToken,
+        code: signInCode.trim(),
+        name: providerName.trim() || undefined,
+      })
+      onSaved()
+      handleClose()
+    } catch (err: unknown) {
+      setError(getErrorMessage(err) || t('onboarding.providers.testFailed'))
+      setSignInStatus('awaiting')
+    }
+  }
+
+  // Families this provider type can serve, in display order. When more than
+  // one is available, the form shows checkboxes so the user can opt into a
+  // subset (e.g. only "Images" for OpenAI). Defaults all checked.
+  const FAMILY_ORDER = ['llm', 'embedding', 'image', 'search', 'tts', 'stt'] as const
+  const FAMILY_LABEL_KEY: Record<string, string> = {
+    llm: 'onboarding.providers.familyLlm',
+    embedding: 'onboarding.providers.familyEmbedding',
+    image: 'onboarding.providers.familyImage',
+    search: 'onboarding.providers.familySearch',
+    tts: 'onboarding.providers.familyTts',
+    stt: 'onboarding.providers.familyStt',
+  }
+  const FAMILY_LABEL_FALLBACK: Record<string, string> = {
+    llm: 'LLM (chat)',
+    embedding: 'Embeddings (memory search)',
+    image: 'Image generation',
+    search: 'Web search',
+    tts: 'Text-to-speech',
+    stt: 'Speech-to-text',
+  }
+  const supportedFamilies = FAMILY_ORDER.filter((f) =>
+    getCapabilitiesForType(providerType).includes(f),
+  )
+  // Initialise selected families. In edit mode we seed from the row's
+  // currently-persisted capabilities (intersected with what the type
+  // still supports — handles the edge case where a plugin drops a
+  // capability between versions). In create mode every supported
+  // family is ticked by default so users opt out rather than in.
+  useEffect(() => {
+    if (isEditing && provider?.capabilities) {
+      const persisted = supportedFamilies.filter((f) =>
+        (provider.capabilities ?? []).includes(f),
+      )
+      setSelectedFamilies(persisted.length > 0 ? persisted : supportedFamilies)
+    } else {
+      setSelectedFamilies(supportedFamilies)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providerType, isEditing, provider?.id])
+  const showsFamilyPicker = supportedFamilies.length > 1
+  const toggleFamily = (family: string) => {
+    setSelectedFamilies((prev) =>
+      prev.includes(family) ? prev.filter((f) => f !== family) : [...prev, family],
+    )
+    resetTest()
+  }
+
+  const handleTestConnection = async () => {
+    setError('')
+    setIsTesting(true)
+    setTestPassed(false)
+
+    try {
+      const config = buildConfig()
+
+      // In edit mode the provider already has a stored config (the encrypted
+      // API token, etc.). Hit the per-provider test endpoint so the server
+      // overlays the partial patch onto the stored config — that way the
+      // user can validate a new field (custom-models list, rotated token)
+      // without re-entering the masked secrets the placeholder told them
+      // they could leave blank.
+      if (isEditing) {
+        const result = await api.post<{ valid: boolean; error?: string }>(
+          `/providers/${provider!.id}/test`,
+          Object.keys(config).length > 0 ? { config } : undefined,
+        )
+        if (result.valid) {
+          setTestPassed(true)
+        } else {
+          setError(result.error || t('onboarding.providers.testFailed'))
+        }
+        return
+      }
+
+      const result = await api.post<{ valid: boolean; error?: string }>('/providers/test', {
+        type: providerType,
+        config,
+      })
+
+      if (result.valid) {
+        setTestPassed(true)
+      } else {
+        setError(result.error || t('onboarding.providers.testFailed'))
+      }
+    } catch (err: unknown) {
+      setError(getErrorMessage(err) || t('onboarding.providers.testFailed'))
+    } finally {
+      setIsTesting(false)
+    }
+  }
+
+  const handleSave = async () => {
+    setError('')
+    setIsSaving(true)
+
+    try {
+      if (isEditing) {
+        const body: Record<string, unknown> = {}
+        if (providerName !== provider!.name) body.name = providerName || provider!.type
+        const config = buildConfig()
+        if (Object.keys(config).length > 0) body.config = config
+        // testPassed sticks across the save click, so when the user
+        // tested then saved we can skip the server-side re-test. It
+        // resets to false on any field edit (see resetTest hooks).
+        if (testPassed && Object.keys(config).length > 0) body.skipTest = true
+        // Send families when the picker was visible — the user may
+        // have ticked/unticked boxes to add or drop capabilities on
+        // the row. The PATCH route intersects with what the type
+        // supports server-side, so a stale UI can't grant unsupported
+        // families.
+        const familiesChanged =
+          showsFamilyPicker &&
+          (selectedFamilies.length !== (provider!.capabilities?.length ?? 0) ||
+            selectedFamilies.some((f) => !(provider!.capabilities ?? []).includes(f)))
+        if (familiesChanged) body.families = selectedFamilies
+        if (
+          providerName !== provider!.name ||
+          Object.keys(config).length > 0 ||
+          familiesChanged
+        ) {
+          await api.patch(`/providers/${provider!.id}`, body)
+        }
+      } else {
+        await api.post('/providers', {
+          name: providerName || (catalogue.displayNames[providerType] ?? providerType),
+          type: providerType,
+          config: buildConfig(),
+          // Only send `families` when the picker was actually shown — otherwise
+          // the backend defaults to "every family the type supports", which is
+          // exactly what we want for single-family providers.
+          ...(showsFamilyPicker ? { families: selectedFamilies } : {}),
+          // Avoid a second auth hit in the create path when the user
+          // just tested. Matters for rate-limited providers (Brave free
+          // tier = 1 req/sec → 429 on the back-to-back call).
+          ...(testPassed ? { skipTest: true } : {}),
+        })
+      }
+
+      onSaved()
+      handleClose()
+    } catch (err: unknown) {
+      setError(getErrorMessage(err) || t('onboarding.providers.testFailed'))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // In edit mode, the user can save name-only changes without re-testing
+  const nameChanged = isEditing && providerName !== provider!.name
+  const configChanged = Object.keys(buildConfig()).length > 0
+  const canSaveWithoutTest = isEditing && nameChanged && !configChanged
+  // Block save when the family picker is shown and no family is selected —
+  // the backend would reject this with NO_FAMILIES; surface the constraint
+  // in the UI instead so the user doesn't have to round-trip.
+  const familiesValid = !showsFamilyPicker || selectedFamilies.length > 0
+  const canSave = (testPassed || canSaveWithoutTest) && familiesValid
+
+  return (
+    <FormDialog
+      open={open}
+      onOpenChange={(v) => { if (!v) handleClose() }}
+      title={isEditing ? t('settings.providers.edit') : t('onboarding.providers.addProvider')}
+      description={isEditing ? t('settings.providers.editHint') : t('onboarding.providers.addProviderHint')}
+      size="lg"
+      error={error}
+      // Enter submits the currently-valid action: in sign-in mode, connect once
+      // a code is pasted (otherwise open the sign-in page); otherwise Save when
+      // the form is ready, else Test connection. The footer below mirrors this.
+      onSubmit={
+        inSignInMode
+          ? (signInCode.trim() ? handleCompleteSignIn : handleStartSignIn)
+          : (canSave ? handleSave : handleTestConnection)
+      }
+      footer={
+        <>
+          <Button type="button" variant="outline" onClick={handleClose}>
+            {t('common.cancel')}
+          </Button>
+          {inSignInMode ? (
+            <Button
+              type="button"
+              onClick={handleCompleteSignIn}
+              disabled={signInStatus !== 'awaiting' || !signInCode.trim()}
+              className="btn-shine"
+            >
+              {signInStatus === 'connecting' ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  {t('onboarding.providers.connecting')}
+                </>
+              ) : (
+                t('onboarding.providers.connect')
+              )}
+            </Button>
+          ) : !canSave ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleTestConnection}
+              disabled={
+                isTesting
+                || (!isEditing
+                  && !isApiKeyOptional
+                  && !hasOptionalApiKey
+                  // All required fields must have a value before testing.
+                  && configSchema.some((f) => f.required && !configValues[f.key]?.trim())
+                )
+              }
+            >
+              {isTesting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  {t('onboarding.providers.testing')}
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="size-4" />
+                  {t('onboarding.providers.test')}
+                </>
+              )}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving}
+              className="btn-shine"
+            >
+              {isSaving ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : isEditing ? (
+                t('common.save')
+              ) : (
+                t('onboarding.providers.add')
+              )}
+            </Button>
+          )}
+        </>
+      }
+    >
+      {testPassed && (
+        <Alert className="animate-scale-in border-primary/30 bg-primary/5 text-primary">
+          <CheckCircle2 className="size-4" />
+          <AlertDescription>{t('onboarding.providers.testSuccess')}</AlertDescription>
+        </Alert>
+      )}
+
+      {!isEditing && types.length > 1 && (
+        <FormField label={t('onboarding.providers.type')}>
+          <Select value={providerType} onValueChange={(v) => {
+            setProviderType(v)
+            setProviderName('')
+            resetTest()
+          }}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {types.map((type) => (
+                <SelectItem key={type} value={type}>
+                  <span className="flex items-center gap-2">
+                    <ProviderIcon providerType={type} className="size-4 shrink-0" />
+                    <span>{catalogue.displayNames[type] ?? type}</span>
+                    <span className="text-xs text-muted-foreground">
+                      ({getCapabilitiesForType(type).join(', ')})
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FormField>
+      )}
+
+      {supportsSignIn && (
+        <FormField label={t('onboarding.providers.authMethod')}>
+          <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+            {(['signin', 'cli'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => {
+                  setAuthMode(mode)
+                  setError('')
+                  if (mode === 'cli') resetSignIn()
+                }}
+                className={cn(
+                  'rounded-md px-3 py-1.5 text-sm font-medium transition',
+                  authMode === mode
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {mode === 'signin'
+                  ? t('onboarding.providers.authSignin')
+                  : t('onboarding.providers.authCliFile')}
+              </button>
+            ))}
+          </div>
+        </FormField>
+      )}
+
+      <FormField
+        label={
+          <>
+            {t('onboarding.providers.name')}
+            <span className="text-xs font-normal text-muted-foreground">
+              ({t('common.optional')})
+            </span>
+          </>
+        }
+        htmlFor="providerName"
+        tip={t('onboarding.providers.nameTip')}
+      >
+        <Input
+          id="providerName"
+          value={providerName}
+          onChange={(e) => setProviderName(e.target.value)}
+          placeholder={t('onboarding.providers.namePlaceholder', { type: catalogue.displayNames[providerType] ?? providerType })}
+        />
+      </FormField>
+
+      {/* CLI-free sign-in panel: open the provider's OAuth page in a new tab,
+          then paste back the authorization code it shows. */}
+      {inSignInMode && (
+        <div className="space-y-3 rounded-lg border border-border/60 bg-card/40 p-4">
+          <p className="text-sm text-muted-foreground">
+            {t('onboarding.providers.signinPanelHint', { provider: providerDisplayName })}
+          </p>
+          {signInStatus === 'idle' || signInStatus === 'starting' ? (
+            <Button
+              type="button"
+              onClick={handleStartSignIn}
+              disabled={signInStatus === 'starting'}
+              className="btn-shine"
+            >
+              {signInStatus === 'starting' ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  {t('onboarding.providers.signinOpening')}
+                </>
+              ) : (
+                <>
+                  <LogIn className="size-4" />
+                  {t('onboarding.providers.signinButton', { provider: providerDisplayName })}
+                </>
+              )}
+            </Button>
+          ) : (
+            <>
+              <a
+                href={signInUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                {t('onboarding.providers.signinReopen')}
+                <ExternalLink className="size-3" />
+              </a>
+              {isLoopbackPaste && (
+                <p className="rounded-md border border-border/60 bg-muted/40 p-2.5 text-xs text-muted-foreground">
+                  {t('onboarding.providers.signinLoopbackHint')}
+                </p>
+              )}
+              <FormField label={t('onboarding.providers.signinCodeLabel')} htmlFor="signInCode">
+                <Input
+                  id="signInCode"
+                  value={signInCode}
+                  onChange={(e) => setSignInCode(e.target.value)}
+                  placeholder={
+                    isLoopbackPaste
+                      ? t('onboarding.providers.signinLoopbackPlaceholder')
+                      : t('onboarding.providers.signinCodePlaceholder')
+                  }
+                  autoComplete="off"
+                  autoFocus
+                />
+              </FormField>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Dynamic config form — one input per ConfigField declared by
+          the provider's `configSchema` (LLMProvider / EmbeddingProvider
+          / ImageProvider). Built-ins and plugin providers go through
+          the same path here, so a plugin author can declare `apiToken`,
+          `region`, `baseUrl`, … and the form renders accordingly. */}
+      {!inSignInMode && (configSchema.length > 0
+        ? configSchema.filter((f) => !HIDDEN_CONFIG_KEYS.has(f.key))
+        : [{ key: 'apiKey', type: 'secret' as const, label: t('onboarding.providers.apiKey'), required: true }]
+      ).map((field) => {
+        const isSecret = field.type === 'secret'
+        const Tag = isSecret ? PasswordInput : Input
+        return (
+          <FormField
+            key={field.key}
+            htmlFor={field.key}
+            label={
+              <>
+                {field.label}
+                {isEditing && (
+                  <span className="text-xs font-normal text-muted-foreground">
+                    ({t('onboarding.providers.apiKeyEditHint')})
+                  </span>
+                )}
+              </>
+            }
+            hint={field.description}
+          >
+            <Tag
+              id={field.key}
+              // Only forward `type` for non-secret fields. PasswordInput
+              // owns its own type ('password' vs 'text' driven by the
+              // eye toggle) and explicitly Omit<…,'type'>s it from its
+              // public surface — passing it here defeats the masking.
+              {...(isSecret ? {} : { type: field.type === 'url' ? 'url' : 'text' })}
+              value={configValues[field.key] ?? ''}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                setConfigValues((v) => ({ ...v, [field.key]: e.target.value }))
+                resetTest()
+              }}
+              autoComplete="off"
+              placeholder={
+                field.placeholder
+                ?? (isSecret && isEditing ? '••••••••' : undefined)
+                ?? (field.type === 'path' ? CREDENTIALS_PATH_PLACEHOLDERS[providerType] ?? '' : undefined)
+              }
+            />
+          </FormField>
+        )
+      })}
+      {apiKeyUrl && !isEditing && (
+        <a
+          href={apiKeyUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+        >
+          {t('onboarding.providers.getApiKey', { provider: catalogue.displayNames[providerType] ?? providerType })}
+          <ExternalLink className="size-3" />
+        </a>
+      )}
+
+      {showsFamilyPicker && (
+        <FormField
+          label={t('onboarding.providers.familiesLabel', 'Enable for')}
+          hint={t(
+            'onboarding.providers.familiesHint',
+            'A single provider row is created with the selected capabilities. The same API key powers every family you enable — toggling them later is a row edit, not a new entry.',
+          )}
+        >
+          <div className="grid gap-1.5">
+            {supportedFamilies.map((family) => (
+              <label
+                key={family}
+                className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 bg-card/50 p-2.5 hover:bg-card/80"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedFamilies.includes(family)}
+                  onChange={() => toggleFamily(family)}
+                  className="mt-0.5"
+                />
+                <span className="text-sm">
+                  {t(FAMILY_LABEL_KEY[family]!, FAMILY_LABEL_FALLBACK[family]!)}
+                </span>
+              </label>
+            ))}
+          </div>
+        </FormField>
+      )}
+    </FormDialog>
+  )
+}

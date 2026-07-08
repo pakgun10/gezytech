@@ -1,0 +1,38 @@
+#!/bin/sh
+
+# Ensure standalone bun (~/.bun/bin/bun) is found even when git invokes
+# the hook with a minimal PATH (no shell rcfile sourced).
+export PATH="$HOME/.bun/bin:$PATH"
+
+echo "🔍 Pre-commit checks..."
+
+# 1. TypeScript type checking
+echo "📝 TypeScript typecheck..."
+bun run typecheck
+if [ $? -ne 0 ]; then
+  echo "❌ TypeScript typecheck failed. Fix type errors before committing."
+  exit 1
+fi
+
+# 2. Unit tests
+# Use `bun run test` (the npm script), not a bare `bun test`: the script passes
+# an explicit, sorted file list. Bare discovery runs test files in an order that
+# leaks global state between them (mock.module is process-global), producing
+# spurious failures. The sorted invocation is the project's source of truth.
+echo "🧪 Running unit tests..."
+bun run test 2>&1
+if [ $? -ne 0 ]; then
+  echo "❌ Unit tests failed. Fix failing tests before committing."
+  exit 1
+fi
+
+# 3. Build check — REMOVED (memory).
+# `bun run build` (the Vite SPA build) peaks at ~3.5 GB heap. Running it on
+# EVERY commit OOM'd low-RAM hosts when autonomous agent-dev tasks committed
+# concurrently (each commit spawning a 3.5 GB build). The build is fully covered
+# by CI — .github/workflows/{ci,e2e,release,showcase}.yml all run `bun run build`
+# on push/PR — so build regressions are still caught, just in CI rather than
+# pre-commit. Re-add the step here if you commit on a machine with ample RAM and
+# want the local gate back.
+
+echo "✅ Pre-commit checks passed (typecheck + tests; build runs in CI)!"

@@ -1,0 +1,2 @@
+ALTER TABLE `tickets` ADD `reporter_user_id` text REFERENCES user(id) ON DELETE SET NULL;--> statement-breakpoint
+ALTER TABLE `tickets` ADD `reporter_kin_id` text REFERENCES kins(id) ON DELETE SET NULL;

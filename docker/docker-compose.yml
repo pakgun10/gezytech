@@ -1,0 +1,53 @@
+# Gezy Docker Compose — VPS Deployment
+#
+# Cara pakai di Arcane GUI:
+#   1. Buka Arcane → Projects → Add Stack
+#   2. Paste isi file ini
+#   3. Isi ENCRYPTION_KEY (generate via: openssl rand -hex 32)
+#   4. Deploy
+#
+# Atau via CLI di VPS:
+#   ENCRYPTION_KEY=$(openssl rand -hex 32) docker compose up -d
+
+services:
+  gezy:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: gezy
+    ports:
+      - "4178:3000"
+    volumes:
+      - gezy-data:/app/data
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - GEZY_DATA_DIR=/app/data
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - GEZY_MODEL_REGISTRY=false
+      - GEZY_PUBLIC_URL=https://aios.gezytech.web.id
+      - GEZY_TIMEZONE=Asia/Jakarta
+      - GEZY_ADAPTIVE_THINKING=true
+    networks:
+      - pgunNet
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://localhost:3000/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  pgunNet:
+    external: true
+
+volumes:
+  gezy-data:

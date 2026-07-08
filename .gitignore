@@ -1,0 +1,81 @@
+# dependencies (bun install)
+node_modules
+
+docker/.env.mine
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# npm publish credentials (never commit)
+npm_token
+.npmrc
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# Data (SQLite DB, uploads, workspaces)
+/data/
+
+# VSCode
+.vscode/
+
+# Claude Code
+.claude/
+.mcp.json
+.marlbot-context.md
+memory-research.md
+memory-experiments/
+channel-files-journal.md
+agent-context-journal.md
+agent-context.json
+
+# External tooling clones living in the working dir (not part of this repo)
+opencode/
+claude-code-sourcemap/
+
+# Internal strategy docs
+branding/
+promo/
+
+# Runtime plugin installs — every plugin now ships independently via
+# npm (see PLUGIN-DEVELOPMENT.md). The plugins/ folder is created and
+# managed by the install handler at runtime; nothing inside belongs in
+# git. The .gitkeep keeps the empty folder tracked so a fresh clone
+# has somewhere for the install workflow to write to.
+plugins/*
+!plugins/.gitkeep
+
+# WSL/Windows alternate-data-stream artifacts
+*:Zone.Identifier
+
+# Stray exported context capture (debug artifact, not part of the app)
+kin-context.json
+image.jpg
+.playwright-mcp/
+test-scratch.txt

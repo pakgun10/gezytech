@@ -1,0 +1,53 @@
+name: 🔌 Provider Request
+description: Request support for a new AI provider
+labels: ["enhancement", "provider"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Want Hivekeep to support a new AI provider? Let us know!
+
+  - type: input
+    id: provider
+    attributes:
+      label: Provider name
+      placeholder: "e.g. AWS Bedrock, Perplexity, etc."
+    validations:
+      required: true
+
+  - type: input
+    id: website
+    attributes:
+      label: Provider website / API docs
+      placeholder: "https://..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: capabilities
+    attributes:
+      label: Capabilities
+      multiple: true
+      options:
+        - LLM (text generation)
+        - Embeddings
+        - Image generation
+        - Search
+    validations:
+      required: true
+
+  - type: dropdown
+    id: api-compat
+    attributes:
+      label: API compatibility
+      description: Is the API compatible with an existing standard?
+      options:
+        - OpenAI-compatible
+        - Custom API
+        - Not sure
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Why this provider? Use case, pricing advantages, unique models, etc.

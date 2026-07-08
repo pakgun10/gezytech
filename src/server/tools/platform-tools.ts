@@ -1,0 +1,557 @@
+import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { resolve } from 'path'
+import { tool } from '@/server/tools/tool-helper'
+import { z } from 'zod'
+import { config } from '@/server/config'
+import { logStore } from '@/server/services/log-store'
+import { createLogger } from '@/server/logger'
+import type { ToolRegistration } from '@/server/tools/types'
+
+const log = createLogger('tools:platform')
+
+/** Keys that are safe to expose via get_platform_config. Sensitive keys are redacted. */
+const SENSITIVE_KEYS = new Set([
+  'ENCRYPTION_KEY',
+  'BETTER_AUTH_SECRET',
+])
+
+/** Keys that can be modified via update_platform_config. */
+const UPDATABLE_KEYS = new Set([
+  'PUBLIC_URL',
+  'TRUSTED_ORIGINS',
+  'PORT',
+  'HOST',
+  'LOG_LEVEL',
+  'HIVEKEEP_DATA_DIR',
+  'HIVEKEEP_TIMEZONE',
+  'COMPACTING_MODEL',
+  'COMPACTING_MAX_SUMMARIES',
+  'HISTORY_TOKEN_BUDGET',
+  'MEMORY_MAX_RELEVANT',
+  'MEMORY_SIMILARITY_THRESHOLD',
+  'MEMORY_EMBEDDING_MODEL',
+  'MEMORY_TOKEN_BUDGET',
+  'TASKS_MAX_DEPTH',
+  'TASKS_MAX_CONCURRENT',
+  'CRONS_MAX_ACTIVE',
+  'CRONS_MAX_CONCURRENT_EXEC',
+  'TOOLS_MAX_STEPS',
+  'INTER_KIN_MAX_CHAIN_DEPTH',
+  'INTER_KIN_RATE_LIMIT',
+  'UPLOAD_MAX_FILE_SIZE',
+  'UPLOAD_CHANNEL_RETENTION_DAYS',
+  'WEBHOOKS_MAX_PER_KIN',
+  'WEBHOOKS_RATE_LIMIT_PER_MINUTE',
+  'CHANNELS_MAX_PER_KIN',
+  'WEB_BROWSING_PAGE_TIMEOUT',
+  'WEB_BROWSING_MAX_CONTENT_LENGTH',
+  'WEB_BROWSING_MAX_CONCURRENT',
+  'WEB_BROWSING_HEADLESS_ENABLED',
+  'NOTIFICATIONS_RETENTION_DAYS',
+  'VERSION_CHECK_ENABLED',
+  'VERSION_CHECK_INTERVAL_HOURS',
+  'MINI_APPS_MAX_PER_KIN',
+  'MINI_APPS_BACKEND_ENABLED',
+])
+
+/**
+ * get_platform_logs — query recent platform system logs.
+ * Opt-in tool: disabled by default.
+ */
+export const getPlatformLogsTool: ToolRegistration = {
+  availability: ['main'],
+  readOnly: true,
+  concurrencySafe: true,
+  defaultDisabled: true,
+  create: (ctx) =>
+    tool({
+      description:
+        'Query recent platform system logs. Logs are in-memory only, not persisted across restarts.',
+      inputSchema: z.object({
+        level: z
+          .enum(['info', 'warn', 'error', 'fatal'])
+          .optional(),
+        module: z
+          .string()
+          .optional()
+          .describe('Partial match (e.g. "agent-engine", "queue", "cron")'),
+        search: z
+          .string()
+          .optional()
+          .describe('Case-insensitive text search'),
+        minutes_ago: z
+          .number()
+          .int()
+          .min(1)
+          .max(1440)
+          .optional()
+          .describe('Default: 60'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe('Default: 50'),
+      }),
+      execute: async ({ level, module, search, minutes_ago, limit }) => {
+        log.debug({ agentId: ctx.agentId, level, module, search }, 'Platform logs queried')
+
+        const entries = logStore.query({
+          level,
+          module,
+          search,
+          minutesAgo: minutes_ago ?? 60,
+          limit: limit ?? 50,
+        })
+
+        return {
+          count: entries.length,
+          entries: entries.map((e) => ({
+            level: e.level,
+            module: e.module,
+            message: e.message,
+            data: e.data,
+            timestamp: e.timestamp,
+          })),
+        }
+      },
+    }),
+}
+
+/**
+ * get_platform_config — read the current Hivekeep configuration.
+ * Sensitive values (encryption keys, auth secrets) are redacted.
+ */
+export const getPlatformConfigTool: ToolRegistration = {
+  availability: ['main'],
+  readOnly: true,
+  concurrencySafe: true,
+  create: (ctx) =>
+    tool({
+      description:
+        'Read the current Hivekeep platform configuration. Sensitive values are redacted.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        log.debug({ agentId: ctx.agentId }, 'Platform config queried')
+
+        // Collect environment variables that are currently set
+        const envVars: Record<string, string> = {}
+        const envPrefixes = [
+          'PORT', 'HOST', 'PUBLIC_URL', 'TRUSTED_ORIGINS', 'LOG_LEVEL',
+          'HIVEKEEP_', 'DB_PATH',
+          'COMPACTING_', 'HISTORY_TOKEN_BUDGET',
+          'MEMORY_', 'QUEUE_', 'TASKS_', 'CRONS_', 'TOOLS_',
+          'HUMAN_PROMPTS_', 'INTER_KIN_', 'MCP_',
+          'VAULT_', 'WORKSPACE_', 'UPLOAD_', 'FILE_STORAGE_',
+          'WEBHOOKS_', 'CHANNELS_', 'QUICK_SESSION_',
+          'WEB_BROWSING_', 'INVITATION_', 'NOTIFICATIONS_',
+          'WAKEUPS_', 'MINI_APPS_', 'VERSION_CHECK_',
+        ]
+
+        for (const [key, value] of Object.entries(process.env)) {
+          if (!value) continue
+          const matches = envPrefixes.some((prefix) => key === prefix || key.startsWith(prefix))
+          if (!matches) continue
+          if (SENSITIVE_KEYS.has(key)) {
+            envVars[key] = '[REDACTED]'
+          } else {
+            envVars[key] = value
+          }
+        }
+
+        return {
+          version: config.version,
+          installation: {
+            type: config.environment.installationType,
+            envFilePath: config.environment.envFilePath,
+            serviceFilePath: config.environment.serviceFilePath,
+            workingDir: config.environment.workingDir,
+            user: config.environment.user,
+            isDocker: config.isDocker,
+          },
+          publicUrl: config.publicUrl,
+          port: config.port,
+          dataDir: config.dataDir,
+          logLevel: config.logLevel,
+          dbPath: config.db.path,
+          activeEnvironmentVariables: envVars,
+          configSource: config.environment.envFilePath
+            ? `env file: ${config.environment.envFilePath}`
+            : config.isDocker
+              ? 'Docker environment variables'
+              : config.environment.serviceFilePath
+                ? 'systemd service file'
+                : 'process environment / defaults',
+        }
+      },
+    }),
+}
+
+/**
+ * Catalog of configurable env vars parsed from .env.example.
+ * One entry per documented option, with section header, default value,
+ * description text (joined from preceding comment lines), and an optional
+ * inline unit/note (e.g., "# MB").
+ */
+interface ConfigOption {
+  section: string
+  key: string
+  defaultValue: string | null
+  description: string
+  unit: string | null
+  /** true if the var is uncommented in .env.example (effectively required / actively set as default). */
+  uncommentedDefault: boolean
+}
+
+let _envExampleCache: { path: string; options: ConfigOption[] } | null = null
+
+function locateEnvExample(): string | null {
+  const candidates = [
+    typeof import.meta.dir === 'string'
+      ? resolve(import.meta.dir, '..', '..', '..', '.env.example')
+      : null,
+    resolve(process.cwd(), '.env.example'),
+    config.environment.workingDir
+      ? resolve(config.environment.workingDir, '.env.example')
+      : null,
+    '/app/.env.example',
+  ].filter(Boolean) as string[]
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+  return null
+}
+
+/** Parse the .env.example catalog. Cached after the first successful parse. */
+function loadConfigOptions(): { path: string | null; options: ConfigOption[] } {
+  if (_envExampleCache) return _envExampleCache
+
+  const path = locateEnvExample()
+  if (!path) return { path: null, options: [] }
+
+  const content = readFileSync(path, 'utf-8')
+  const options: ConfigOption[] = []
+  let section = 'General'
+  let pendingDescription: string[] = []
+
+  const sectionRegex = /^#\s*─+\s*(.+?)\s*─+\s*$/
+  const varRegex = /^(#\s*)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)(?:\s+#\s*(.+?))?\s*$/
+
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.trim()
+
+    const sectionMatch = line.match(sectionRegex)
+    if (sectionMatch) {
+      section = sectionMatch[1]!.trim()
+      pendingDescription = []
+      continue
+    }
+
+    if (!line) {
+      pendingDescription = []
+      continue
+    }
+
+    const varMatch = line.match(varRegex)
+    if (varMatch) {
+      const [, commentPrefix, key, rawValue, inlineNote] = varMatch
+      // Skip sensitive keys entirely from the catalog (they're documented but
+      // belong to manual setup paths).
+      if (!SENSITIVE_KEYS.has(key!)) {
+        options.push({
+          section,
+          key: key!,
+          defaultValue: rawValue ? rawValue.trim() : null,
+          description: pendingDescription.join(' ').trim(),
+          unit: inlineNote ? inlineNote.trim() : null,
+          uncommentedDefault: !commentPrefix,
+        })
+      }
+      pendingDescription = []
+      continue
+    }
+
+    if (line.startsWith('#')) {
+      const text = line.replace(/^#\s?/, '').trim()
+      if (text) pendingDescription.push(text)
+    }
+  }
+
+  _envExampleCache = { path, options }
+  return _envExampleCache
+}
+
+export const listPlatformConfigOptionsTool: ToolRegistration = {
+  availability: ['main'],
+  readOnly: true,
+  concurrencySafe: true,
+  create: (ctx) =>
+    tool({
+      description:
+        'List all platform configuration options documented in .env.example, with section, default value, description, and current runtime value. Use before update_platform_config to discover what variables are available.',
+      inputSchema: z.object({
+        section: z
+          .string()
+          .optional()
+          .describe('Filter by section name (case-insensitive substring match, e.g. "Crons").'),
+        key: z
+          .string()
+          .optional()
+          .describe('Filter by exact key name (e.g. "HIVEKEEP_TIMEZONE").'),
+      }),
+      execute: async ({ section, key }) => {
+        log.debug({ agentId: ctx.agentId, section, key }, 'Platform config options listed')
+        const { path, options } = loadConfigOptions()
+
+        if (!path) {
+          return {
+            error: 'Could not locate .env.example in the deployment. The platform may be missing reference documentation.',
+            options: [],
+          }
+        }
+
+        let filtered = options
+        if (section) {
+          const needle = section.toLowerCase()
+          filtered = filtered.filter((o) => o.section.toLowerCase().includes(needle))
+        }
+        if (key) {
+          filtered = filtered.filter((o) => o.key === key)
+        }
+
+        const enriched = filtered.map((o) => {
+          const currentValue = process.env[o.key]
+          const isSet = currentValue !== undefined && currentValue !== ''
+          const isUpdatable = UPDATABLE_KEYS.has(o.key)
+          return {
+            section: o.section,
+            key: o.key,
+            description: o.description || null,
+            defaultValue: o.defaultValue,
+            unit: o.unit,
+            currentValue: isSet ? currentValue : null,
+            isSet,
+            usingDefault: !isSet,
+            updatable: isUpdatable,
+          }
+        })
+
+        return {
+          source: path,
+          totalOptions: options.length,
+          returned: enriched.length,
+          options: enriched,
+        }
+      },
+    }),
+}
+
+/**
+ * Parse a .env file into a Map of key→value, preserving comments and empty lines
+ * for round-trip editing.
+ */
+function parseEnvFile(content: string): { lines: string[]; vars: Map<string, { lineIndex: number; value: string }> } {
+  const lines = content.split('\n')
+  const vars = new Map<string, { lineIndex: number; value: string }>()
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim()
+    if (!line || line.startsWith('#')) continue
+    const eqIndex = line.indexOf('=')
+    if (eqIndex === -1) continue
+    const key = line.slice(0, eqIndex).trim()
+    let value = line.slice(eqIndex + 1).trim()
+    // Strip surrounding quotes
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1)
+    }
+    vars.set(key, { lineIndex: i, value })
+  }
+  return { lines, vars }
+}
+
+/**
+ * update_platform_config — modify a configuration value.
+ * Only works when an env file is available. Opt-in tool: disabled by default.
+ */
+export const updatePlatformConfigTool: ToolRegistration = {
+  availability: ['main'],
+  defaultDisabled: true,
+  create: (ctx) =>
+    tool({
+      description:
+        'Update a Hivekeep config value in the .env file. Restart required. Security-critical keys are blocked.',
+      inputSchema: z.object({
+        key: z.string().describe('Environment variable key (e.g. "PUBLIC_URL", "LOG_LEVEL")'),
+        value: z.string(),
+      }),
+      execute: async ({ key, value }) => {
+        log.info({ agentId: ctx.agentId, key }, 'Platform config update requested')
+
+        // Validate key
+        if (SENSITIVE_KEYS.has(key)) {
+          return {
+            success: false,
+            error: `Cannot modify "${key}" — this is a security-critical value that must be changed manually.`,
+          }
+        }
+
+        if (!UPDATABLE_KEYS.has(key)) {
+          return {
+            success: false,
+            error: `Key "${key}" is not in the allowed update list. Allowed keys: ${[...UPDATABLE_KEYS].sort().join(', ')}`,
+          }
+        }
+
+        const installType = config.environment.installationType
+        const envFilePath = config.environment.envFilePath
+
+        // Docker: can't modify at runtime
+        if (installType === 'docker') {
+          return {
+            success: false,
+            error: 'Docker environment variables cannot be changed at runtime.',
+            guidance:
+              'To change this value:\n' +
+              '1. Edit your docker-compose.yml (or .env file next to it) and set:\n' +
+              `   ${key}=${value}\n` +
+              '2. Run: docker compose up -d\n' +
+              'This will recreate the container with the new configuration.',
+          }
+        }
+
+        // No env file found
+        if (!envFilePath) {
+          if (installType === 'systemd-system') {
+            const servicePath = config.environment.serviceFilePath ?? '/etc/systemd/system/hivekeep.service'
+            return {
+              success: false,
+              error: 'No env file found for this systemd system service.',
+              guidance:
+                `The service file is at: ${servicePath}\n` +
+                'Options:\n' +
+                `1. Add an EnvironmentFile to the service unit and set ${key}=${value} there.\n` +
+                `2. Or run: sudo systemctl edit hivekeep --force and add:\n` +
+                `   [Service]\n` +
+                `   Environment="${key}=${value}"\n` +
+                'Then: sudo systemctl daemon-reload && sudo systemctl restart hivekeep',
+            }
+          }
+          if (installType === 'systemd-user') {
+            return {
+              success: false,
+              error: 'No env file found for this systemd user service.',
+              guidance:
+                'Options:\n' +
+                `1. Create an env file (e.g., ~/.local/share/hivekeep/hivekeep.env) with ${key}=${value}\n` +
+                `2. Add EnvironmentFile= to your service unit pointing to that file.\n` +
+                '3. Run: systemctl --user daemon-reload && systemctl --user restart hivekeep',
+            }
+          }
+          // Manual: suggest creating .env
+          return {
+            success: false,
+            error: 'No persistent configuration file found.',
+            guidance:
+              `Create a .env file in the Hivekeep working directory (${config.environment.workingDir}):\n` +
+              `echo '${key}=${value}' >> ${resolve(config.environment.workingDir, '.env')}\n` +
+              'Then restart Hivekeep for the change to take effect.',
+          }
+        }
+
+        // We have an env file — read, modify, write
+        try {
+          const content = existsSync(envFilePath) ? readFileSync(envFilePath, 'utf-8') : ''
+          const { lines, vars } = parseEnvFile(content)
+
+          if (vars.has(key)) {
+            // Update existing line
+            const entry = vars.get(key)!
+            lines[entry.lineIndex] = `${key}=${value}`
+          } else {
+            // Append new key
+            lines.push(`${key}=${value}`)
+          }
+
+          writeFileSync(envFilePath, lines.join('\n'))
+          log.info({ agentId: ctx.agentId, key, envFilePath }, 'Platform config updated in env file')
+
+          return {
+            success: true,
+            envFilePath,
+            key,
+            value,
+            restartRequired: true,
+            message:
+              `Updated ${key}=${value} in ${envFilePath}. ` +
+              'A restart is required for this change to take effect.' +
+              (installType === 'systemd-user'
+                ? ' Run: systemctl --user restart hivekeep'
+                : installType === 'systemd-system'
+                  ? ' Run: sudo systemctl restart hivekeep'
+                  : ' Restart the Hivekeep process.'),
+          }
+        } catch (err) {
+          log.error({ agentId: ctx.agentId, key, envFilePath, err }, 'Failed to update env file')
+          return {
+            success: false,
+            error: `Failed to write to ${envFilePath}: ${err instanceof Error ? err.message : String(err)}`,
+          }
+        }
+      },
+    }),
+}
+
+/**
+ * restart_platform — trigger a graceful restart of Hivekeep.
+ * Works by exiting the process and relying on the service manager to restart it.
+ * Opt-in tool: disabled by default.
+ */
+export const restartPlatformTool: ToolRegistration = {
+  availability: ['main'],
+  defaultDisabled: true,
+  destructive: true,
+  create: (ctx) =>
+    tool({
+      description:
+        'Trigger a graceful restart of Hivekeep. Always use prompt_human() for user confirmation first.',
+      inputSchema: z.object({
+        reason: z.string(),
+        confirmed: z.boolean().describe('Must be true after explicit user confirmation via prompt_human()'),
+      }),
+      execute: async ({ reason, confirmed }) => {
+        if (!confirmed) {
+          return {
+            success: false,
+            error: 'Restart not confirmed. Use prompt_human() to get explicit user confirmation before restarting.',
+          }
+        }
+
+        const installType = config.environment.installationType
+
+        // Manual installations won't auto-restart
+        if (installType === 'manual') {
+          return {
+            success: false,
+            error: 'Hivekeep is running manually (not managed by a service manager). ' +
+              'Exiting would stop the process without automatic restart. ' +
+              'Please ask the user to restart Hivekeep manually.',
+          }
+        }
+
+        log.warn({ agentId: ctx.agentId, reason, installType }, 'Platform restart triggered by Agent')
+
+        // Schedule exit after a short delay to allow the response to be sent
+        setTimeout(() => {
+          log.info('Graceful shutdown initiated by restart_platform tool')
+          process.exit(0)
+        }, 1500)
+
+        return {
+          success: true,
+          message: `Hivekeep is restarting (${installType} will bring it back up). Reason: ${reason}`,
+          installationType: installType,
+        }
+      },
+    }),
+}

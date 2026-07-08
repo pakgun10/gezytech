@@ -1,0 +1,172 @@
+import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { Button } from '@/client/components/ui/button'
+import { Plus , FileUp} from 'lucide-react'
+import { EmptyState } from '@/client/components/common/EmptyState'
+import { HelpPanel } from '@/client/components/common/HelpPanel'
+import { ListToolbar } from '@/client/components/common/ListToolbar'
+import { ListPagination } from '@/client/components/common/ListPagination'
+import { SettingsListSkeleton } from '@/client/components/common/SettingsListSkeleton'
+import { useListControls } from '@/client/hooks/useListControls'
+import { LIST_FILTER_THRESHOLD } from '@/shared/constants'
+import { api, getErrorMessage, toastError } from '@/client/lib/api'
+import { useAgentList } from '@/client/hooks/useAgentList'
+import { FileStorageCard, type StoredFileData } from '@/client/components/file-storage/FileStorageCard'
+import { FileStorageFormDialog } from '@/client/components/file-storage/FileStorageFormDialog'
+
+export function FileStorageSettings() {
+  const { t } = useTranslation()
+  const [files, setFiles] = useState<StoredFileData[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const { agents, agentNames, agentAvatars } = useAgentList()
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editingFile, setEditingFile] = useState<StoredFileData | null>(null)
+
+  useEffect(() => {
+    fetchFiles()
+  }, [])
+
+  const fetchFiles = async () => {
+    try {
+      setFetchError(null)
+      const data = await api.get<{ files: StoredFileData[] }>('/file-storage')
+      setFiles(data.files)
+    } catch (err: unknown) {
+      setFetchError(getErrorMessage(err))
+      toast.error(t('settings.files.fetchError', 'Failed to load files'))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleDeleteFile = async (id: string) => {
+    try {
+      await api.delete(`/file-storage/${id}`)
+      await fetchFiles()
+      toast.success(t('settings.files.deleted'))
+    } catch (err: unknown) {
+      toastError(err)
+    }
+  }
+
+  const handleSaved = async () => {
+    await fetchFiles()
+    toast.success(editingFile ? t('settings.files.saved') : t('settings.files.added'))
+  }
+
+  const openAdd = () => {
+    setEditingFile(null)
+    setModalOpen(true)
+  }
+
+  const openEdit = (file: StoredFileData) => {
+    setEditingFile(file)
+    setModalOpen(true)
+  }
+
+  const list = useListControls(files, {
+    searchText: (f) => [f.name, f.originalName, f.description],
+    pageSize: 20,
+  })
+
+  if (isLoading) {
+    return <SettingsListSkeleton count={2} />
+  }
+
+  if (fetchError) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-destructive">{fetchError}</p>
+        <Button variant="outline" onClick={() => {
+          setIsLoading(true)
+          setFetchError(null)
+          fetchFiles()
+        }}>
+          {t('common.retry', 'Retry')}
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {t('settings.files.description')}
+        </p>
+      </div>
+
+      <HelpPanel
+        contentKey="settings.files.help.content"
+        bulletKeys={[
+          'settings.files.help.bullet1',
+          'settings.files.help.bullet2',
+          'settings.files.help.bullet3',
+        ]}
+        storageKey="help.files.open"
+      />
+
+      {files.length === 0 && (
+        <EmptyState
+          icon={FileUp}
+          title={t('settings.files.empty')}
+          description={t('settings.files.emptyDescription')}
+          actionLabel={t('settings.files.add')}
+          onAction={openAdd}
+        />
+      )}
+
+      {files.length >= LIST_FILTER_THRESHOLD && (
+        <ListToolbar
+          query={list.query}
+          onQueryChange={list.setQuery}
+          placeholder={t('settings.files.search', 'Search files...')}
+          onClear={() => list.setQuery('')}
+          active={list.isSearching}
+        />
+      )}
+
+      {files.length > 0 && list.total === 0 && (
+        <EmptyState minimal title={t('common.noResults', 'No results found')} />
+      )}
+
+      {list.paged.map((file) => (
+        <FileStorageCard
+          key={file.id}
+          file={file}
+          agentName={file.createdByAgentId ? agentNames.get(file.createdByAgentId) : undefined}
+          agentAvatarUrl={file.createdByAgentId ? agentAvatars.get(file.createdByAgentId) : undefined}
+          onEdit={() => openEdit(file)}
+          onDelete={() => handleDeleteFile(file.id)}
+        />
+      ))}
+
+      <ListPagination
+        page={list.page}
+        pageCount={list.pageCount}
+        total={list.total}
+        rangeFrom={list.rangeFrom}
+        rangeTo={list.rangeTo}
+        onPageChange={list.setPage}
+        perPage={list.perPage}
+        onPerPageChange={list.setPerPage}
+      />
+
+      <Button variant="outline" onClick={openAdd} className="w-full">
+        <Plus className="size-4" />
+        {t('settings.files.add')}
+      </Button>
+
+      <FileStorageFormDialog
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+        onSaved={handleSaved}
+        file={editingFile}
+        agents={agents}
+      />
+
+    </div>
+  )
+}

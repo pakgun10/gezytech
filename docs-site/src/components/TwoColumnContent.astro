@@ -1,0 +1,23 @@
+---
+/**
+ * TwoColumnContent override: glass right sidebar panel.
+ */
+import Default from '@astrojs/starlight/components/TwoColumnContent.astro';
+---
+
+<Default>
+	<slot />
+	<slot name="right-sidebar" slot="right-sidebar" />
+</Default>
+
+<style>
+	/* Right sidebar: glass panel on desktop */
+	@media (min-width: 72rem) {
+		:global(.right-sidebar) {
+			background: var(--kb-glass-bg);
+			backdrop-filter: blur(8px) saturate(160%);
+			-webkit-backdrop-filter: blur(8px) saturate(160%);
+			border-inline-start: 1px solid var(--kb-glass-border) !important;
+		}
+	}
+</style>
