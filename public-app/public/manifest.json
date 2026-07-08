@@ -1,0 +1,16 @@
+{
+  "name": "GezyTech",
+  "short_name": "GezyTech",
+  "description": "GezyTech Public Web Chat — AI Agent as a Service",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#2563eb",
+  "background_color": "#fafafa",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232563eb'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='white' font-family='system-ui'>G</text></svg>",
+      "sizes": "32x32",
+      "type": "image/svg+xml"
+    }
+  ]
+}

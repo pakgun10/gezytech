@@ -28,7 +28,27 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [sessionError, setSessionError] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Load chat history on mount
+  useEffect(() => {
+    fetch("/api/chat/history")
+      .then((r) => {
+        if (r.status === 401) {
+          setSessionError(true);
+          return null;
+        }
+        if (!r.ok) throw new Error("Failed");
+        return r.json();
+      })
+      .then((data) => {
+        if (data?.messages) loadHistory(data.messages);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingHistory(false));
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -151,6 +171,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
 
   return (
     <div
+      className="chat-container"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -159,8 +180,32 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
         margin: "0 auto",
       }}
     >
+      {/* Session error banner */}
+      {sessionError && (
+        <div
+          style={{
+            padding: "12px 16px",
+            background: "#fef2f2",
+            color: "#dc2626",
+            fontSize: 13,
+            textAlign: "center",
+            borderBottom: "1px solid #fecaca",
+          }}
+        >
+          ⚠️ Session expired.{" "}
+          <a
+            href="/"
+            style={{ color: "#dc2626", fontWeight: 600, cursor: "pointer" }}
+            onClick={() => window.location.reload()}
+          >
+            Refresh page
+          </a>{" "}
+          to re-login.
+        </div>
+      )}
       {/* Chat header */}
       <div
+        className="chat-header"
         style={{
           padding: "12px 16px",
           borderBottom: "1px solid #e5e5e5",
@@ -171,7 +216,10 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
         }}
       >
         <span style={{ fontWeight: 600 }}>Agent: {agentSlug}</span>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div
+          className="chat-header-btns"
+          style={{ display: "flex", alignItems: "center", gap: 12 }}
+        >
           <TokenBar />
           <HistoryPanel />
           <ToolRequestButton />
@@ -181,12 +229,56 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
       </div>
 
       {/* Messages */}
-      <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
+      <div
+        className="chat-messages"
+        style={{ flex: 1, overflow: "auto", padding: 16 }}
+      >
+        {/* Loading skeleton */}
+        {loadingHistory && (
+          <div style={{ padding: "16px 0" }}>
+            {[1, 2, 3].map((i) => (
+              <div key={i} style={{ marginBottom: 20 }}>
+                <div
+                  className="skeleton skeleton-line"
+                  style={{
+                    width: i % 2 === 0 ? "70%" : "50%",
+                    marginLeft: i % 2 === 0 ? "auto" : 0,
+                  }}
+                />
+                <div
+                  className="skeleton skeleton-line"
+                  style={{
+                    width: i % 2 === 0 ? "40%" : "60%",
+                    marginLeft: i % 2 === 0 ? "auto" : 0,
+                  }}
+                />
+                <div
+                  className="skeleton skeleton-line"
+                  style={{
+                    width: i % 2 === 0 ? "25%" : "35%",
+                    marginLeft: i % 2 === 0 ? "auto" : 0,
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Empty state */}
+        {!loadingHistory && messages.length === 0 && !streamText && (
+          <div className="empty-state">
+            <div className="empty-state-icon">💬</div>
+            <div className="empty-state-title">No messages yet</div>
+            <div className="empty-state-desc">
+              Start a conversation with {agentSlug}! Type a message below.
+            </div>
+          </div>
+        )}
         {messages.map((msg) => (
           <div key={msg.id} style={{ marginBottom: 16 }}>
             {msg.role === "user" && (
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <div
+                  className="chat-message-user"
                   style={{
                     background: "#2563eb",
                     color: "#fff",
@@ -203,6 +295,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
             {msg.role === "agent" && (
               <div style={{ display: "flex", justifyContent: "flex-start" }}>
                 <div
+                  className="chat-message-agent"
                   style={{
                     background: "#f3f4f6",
                     padding: "10px 16px",
@@ -285,6 +378,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
 
       {/* Input */}
       <div
+        className="chat-input-area"
         style={{
           padding: 12,
           borderTop: "1px solid #e5e5e5",

@@ -26,6 +26,7 @@ function App() {
     <div style={{ fontFamily: "system-ui" }}>
       {/* Top bar */}
       <div
+        className="top-bar"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -35,12 +36,21 @@ function App() {
           background: "#fafafa",
         }}
       >
-        <span style={{ fontWeight: 700, fontSize: 16 }}>GezyTech</span>
+        <span
+          className="top-bar-title"
+          style={{ fontWeight: 700, fontSize: 16 }}
+        >
+          GezyTech
+        </span>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 13, color: "#666" }}>
+          <span
+            className="top-bar-user"
+            style={{ fontSize: 13, color: "#666" }}
+          >
             {user.displayName} · {user.agentSlug}
           </span>
           <button
+            className="top-bar-btn"
             onClick={logout}
             style={{
               padding: "4px 12px",

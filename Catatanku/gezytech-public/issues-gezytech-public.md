@@ -225,33 +225,33 @@
 
 # EPIC-5 — Tool Request (Phase 2)
 
-## Issue PUB-40 — Tool request backend
+## Issue PUB-40 — Tool request backend ✅ SELESAI
 
 - **Labels**: `P2`, `phase-2`, `backend`
 - **Estimate**: 2
 - **Depends-on**: PUB-10, PUB-21
 - **Tujuan**: Sistem tool request — user request tool, admin approve/reject.
 - **Tugas**
-  - [ ] `POST /api/tool-request` — submit request (tool_name, reason) → status: pending
-  - [ ] `GET /api/tool-requests` — list user's requests + status
-  - [ ] `GET /api/admin/tool-requests` — list all requests (admin only)
-  - [ ] `PATCH /api/admin/tool-requests/:id` — approve/reject + admin_note
-  - [ ] Notifikasi: ketika approved/rejected, tampilkan badge di UI user
+  - [x] `POST /api/tool-request` — submit request (tool_name, reason) → status: pending
+  - [x] `GET /api/tool-requests` — list user's requests + status
+  - [x] `GET /api/admin/tool-requests` — list all requests (admin only)
+  - [x] `PATCH /api/admin/tool-requests/:id` — approve/reject + admin_note
+  - [x] Notifikasi: ketika approved/rejected, tampilkan badge di UI user
 - **Acceptance**: User submit request → admin approve → user lihat status approved
 
 ---
 
-## Issue PUB-41 — Tool request UI
+## Issue PUB-41 — Tool request UI ✅ SELESAI
 
 - **Labels**: `P2`, `phase-2`, `frontend`
 - **Estimate**: 2
 - **Depends-on**: PUB-40
 - **Tujuan**: UI untuk user request tool + lihat status.
 - **Tugas**
-  - [ ] Button "Request Tool" di sidebar/popup
-  - [ ] Form: dropdown tool list (dari gezytech tool catalog) + textarea alasan
-  - [ ] Status list: pending/approved/rejected + admin note
-  - [ ] Badge notifikasi kalau ada update status
+  - [x] Button "Request Tool" di sidebar/popup
+  - [x] Form: dropdown tool list (dari gezytech tool catalog) + textarea alasan
+  - [x] Status list: pending/approved/rejected + admin note
+  - [x] Badge notifikasi kalau ada update status
 - **Acceptance**: User bisa request tool, lihat status request
 
 ---

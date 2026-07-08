@@ -1,18 +1,57 @@
 /* GezyTech Public — global styles */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body, #root { height: 100%; font-family: system-ui, -apple-system, sans-serif; }
-body { background: #fafafa; color: #1f2937; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+html,
+body,
+#root {
+  height: 100%;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+body {
+  background: #fafafa;
+  color: #1f2937;
+}
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
 
 /* Typing indicator blink */
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
 
 /* Skeleton loading */
-@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
 .skeleton {
   background: linear-gradient(90deg, #e5e5e5 25%, #f0f0f0 50%, #e5e5e5 75%);
   background-size: 200% 100%;
@@ -20,14 +59,113 @@ body { background: #fafafa; color: #1f2937; }
   border-radius: 4px;
 }
 
+/* ─── Empty states ─── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: #9ca3af;
+  text-align: center;
+  font-size: 14px;
+  gap: 8px;
+}
+.empty-state-icon {
+  font-size: 40px;
+}
+.empty-state-title {
+  font-weight: 600;
+  color: #6b7280;
+}
+.empty-state-desc {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+/* ─── Skeleton loading block ─── */
+.skeleton-line {
+  height: 14px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+}
+.skeleton-line:last-child {
+  width: 60%;
+}
+
 /* ─── Mobile responsive ─── */
 @media (max-width: 640px) {
-  .chat-header { padding: 8px 12px !important; font-size: 13px; }
-  .chat-message { max-width: 90% !important; font-size: 13px; }
-  .chat-input-area { padding: 8px !important; }
-  .chat-input-area textarea { font-size: 14px; }
-  .top-bar { padding: 6px 12px !important; }
-  .top-bar span { font-size: 13px !important; }
-  .panel-dropdown { width: 280px !important; max-height: 350px !important; }
-  .login-card { padding: 24px !important; }
+  .top-bar {
+    padding: 6px 12px !important;
+    gap: 8px !important;
+  }
+  .top-bar .top-bar-title {
+    font-size: 14px !important;
+  }
+  .top-bar .top-bar-user {
+    font-size: 11px !important;
+  }
+  .top-bar .top-bar-btn {
+    padding: 3px 8px !important;
+    font-size: 11px !important;
+  }
+
+  .chat-container {
+    height: calc(100vh - 48px) !important;
+  }
+  .chat-header {
+    padding: 8px 12px !important;
+    font-size: 13px;
+    gap: 6px !important;
+  }
+  .chat-header .chat-header-btns {
+    gap: 6px !important;
+  }
+  .chat-header .chat-header-btns button {
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+  }
+
+  .chat-messages {
+    padding: 12px !important;
+  }
+  .chat-message-user {
+    max-width: 85% !important;
+    font-size: 13px !important;
+    padding: 8px 12px !important;
+  }
+  .chat-message-agent {
+    max-width: 92% !important;
+    font-size: 13px !important;
+    padding: 8px 12px !important;
+  }
+
+  .chat-input-area {
+    padding: 8px !important;
+  }
+  .chat-input-area textarea {
+    font-size: 14px !important;
+    padding: 8px 10px !important;
+  }
+  .chat-input-area button {
+    padding: 8px 14px !important;
+    font-size: 13px !important;
+  }
+
+  .panel-dropdown {
+    width: 280px !important;
+    max-height: 350px !important;
+  }
+
+  .login-card {
+    padding: 24px 16px !important;
+    margin: 16px !important;
+  }
+  .login-card h1 {
+    font-size: 20px !important;
+  }
+  .login-card input {
+    font-size: 14px !important;
+    padding: 10px !important;
+  }
 }
