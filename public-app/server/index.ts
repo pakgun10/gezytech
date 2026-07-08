@@ -15,7 +15,20 @@ import {
 } from "./auth";
 import { getDb } from "./db";
 import { sendChatMessage } from "./gezytech-client";
-import { createSoulRequest, listSoulRequestsByUser, listAllSoulRequests, approveSoulRequest, rejectSoulRequest } from "./soul-request";
+import {
+  createSoulRequest,
+  listSoulRequestsByUser,
+  listAllSoulRequests,
+  approveSoulRequest,
+  rejectSoulRequest,
+} from "./soul-request";
+import {
+  createToolRequest,
+  listToolRequestsByUser,
+  listAllToolRequests,
+  approveToolRequest,
+  rejectToolRequest,
+} from "./tool-request";
 
 // ─── Init ───
 runMigrations();
@@ -277,12 +290,21 @@ app.get("/api/chat/history", requireAuth, async (c) => {
   const agentSlug = user.agentSlug;
 
   try {
-    const res = await fetch(`${process.env.GEZYTECH_API_URL ?? "http://localhost:3000"}/api/agents/${agentSlug}/messages?limit=100`, {
-      headers: { "x-service-token": SERVICE_TOKEN },
-    });
+    const res = await fetch(
+      `${process.env.GEZYTECH_API_URL ?? "http://localhost:3000"}/api/agents/${agentSlug}/messages?limit=100`,
+      {
+        headers: {
+          "x-service-token":
+            process.env.GEZYTECH_SERVICE_TOKEN ?? "dev-token-shared",
+        },
+      },
+    );
     if (!res.ok) {
       const text = await res.text();
-      return c.json({ error: `Failed to fetch history: ${text.slice(0, 200)}` }, 502);
+      return c.json(
+        { error: `Failed to fetch history: ${text.slice(0, 200)}` },
+        502,
+      );
     }
     const data = await res.json();
     const messages = (data.messages ?? []).map((m: any) => ({
@@ -308,7 +330,9 @@ app.get("/api/token-usage", requireAuth, (c) => {
       input: number;
       output: number;
       count: number;
-    }>("SELECT COALESCE(SUM(input_tokens),0) as input, COALESCE(SUM(output_tokens),0) as output, COALESCE(SUM(total_tokens),0) as total, COUNT(*) as count FROM token_usage WHERE user_id=?")
+    }>(
+      "SELECT COALESCE(SUM(input_tokens),0) as input, COALESCE(SUM(output_tokens),0) as output, COALESCE(SUM(total_tokens),0) as total, COUNT(*) as count FROM token_usage WHERE user_id=?",
+    )
     .get(user.id) ?? { total: 0, input: 0, output: 0, count: 0 };
   return c.json(result);
 });
@@ -348,7 +372,10 @@ app.get("/api/admin/soul-requests", adminAuth, (c) => {
 
 app.patch("/api/admin/soul-requests/:id", adminAuth, async (c) => {
   const id = c.req.param("id");
-  const { action, adminNote } = await c.req.json<{ action?: string; adminNote?: string }>();
+  const { action, adminNote } = await c.req.json<{
+    action?: string;
+    adminNote?: string;
+  }>();
   if (action === "approve") {
     const updated = approveSoulRequest(id, adminNote);
     if (!updated) return c.json({ error: "Request not found" }, 404);
@@ -356,6 +383,49 @@ app.patch("/api/admin/soul-requests/:id", adminAuth, async (c) => {
   }
   if (action === "reject") {
     const updated = rejectSoulRequest(id, adminNote);
+    if (!updated) return c.json({ error: "Request not found" }, 404);
+    return c.json({ request: updated });
+  }
+  return c.json({ error: "Action must be 'approve' or 'reject'" }, 400);
+});
+
+// ─── Tool Requests ───
+
+app.post("/api/tool-request", requireAuth, async (c) => {
+  const user: any = c.get("user");
+  const { toolName, reason } = await c.req.json<{
+    toolName?: string;
+    reason?: string;
+  }>();
+  if (!toolName) return c.json({ error: "Tool name is required" }, 400);
+  const req = createToolRequest({ userId: user.id, toolName, reason });
+  return c.json({ request: req }, 201);
+});
+
+app.get("/api/tool-requests", requireAuth, (c) => {
+  const user: any = c.get("user");
+  const requests = listToolRequestsByUser(user.id);
+  return c.json({ requests });
+});
+
+app.get("/api/admin/tool-requests", adminAuth, (c) => {
+  const requests = listAllToolRequests();
+  return c.json({ requests });
+});
+
+app.patch("/api/admin/tool-requests/:id", adminAuth, async (c) => {
+  const id = c.req.param("id");
+  const { action, adminNote } = await c.req.json<{
+    action?: string;
+    adminNote?: string;
+  }>();
+  if (action === "approve") {
+    const updated = approveToolRequest(id, adminNote);
+    if (!updated) return c.json({ error: "Request not found" }, 404);
+    return c.json({ request: updated });
+  }
+  if (action === "reject") {
+    const updated = rejectToolRequest(id, adminNote);
     if (!updated) return c.json({ error: "Request not found" }, 404);
     return c.json({ request: updated });
   }

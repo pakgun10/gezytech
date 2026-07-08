@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { MemoryPanel } from "./MemoryPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { SoulRequestButton } from "./SoulRequestButton";
+import { ToolRequestButton } from "./ToolRequestButton";
 import { TokenBar, triggerTokenRefresh } from "./TokenBar";
 
 interface Message {
@@ -173,6 +174,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <TokenBar />
           <HistoryPanel />
+          <ToolRequestButton />
           <SoulRequestButton />
           <MemoryPanel />
         </div>
