@@ -325,19 +325,19 @@
 
 ---
 
-## Issue PUB-71 — Polish & responsive
+## Issue PUB-71 — Polish & responsive ✅ SELESAI
 
 - **Labels**: `P2`, `phase-1`, `frontend`
 - **Estimate**: 2
 - **Depends-on**: PUB-22, PUB-30, PUB-31
 - **Tujuan**: Final polish UI — responsive, dark mode, loading states, error states.
 - **Tugas**
-  - [ ] Mobile responsive: chat, memory, token bar bekerja di 360px
-  - [ ] Dark mode (optional, kalau gezytech punya theme system)
-  - [ ] Loading states: skeleton/spinner untuk chat, memory, token
-  - [ ] Error states: network error, gezytech down, session expired
-  - [ ] Empty states: no chat history, no memory, no token usage
-  - [ ] Favicon + PWA manifest (GezyTech branding)
+  - [x] Mobile responsive: chat, memory, token bar bekerja di 360px
+  - [x] Dark mode (optional, kalau gezytech punya theme system)
+  - [x] Loading states: skeleton/spinner untuk chat, memory, token
+  - [x] Error states: network error, gezytech down, session expired
+  - [x] Empty states: no chat history, no memory, no token usage
+  - [x] Favicon + PWA manifest (GezyTech branding)
 - **Acceptance**: UI polished, responsive, tidak ada broken state
 
 ---
