@@ -342,6 +342,24 @@
 
 ---
 
+## Issue PUB-72 — Sidebar history percakapan
+
+- **Labels**: `P1`, `phase-1`, `frontend+backend`
+- **Estimate**: 3
+- **Depends-on**: PUB-22
+- **Tujuan**: Sidebar di kiri/samping chat yang menampilkan daftar percakapan sebelumnya. User bisa klik percakapan lama untuk melihat history-nya.
+- **Tugas**
+  - [ ] Backend: update `GET /api/chat/history` untuk proxy ke gezytech messages API (dengan service token + agent_slug)
+  - [ ] Frontend: komponen `HistoryPanel.tsx` — sidebar dengan list percakapan (grouped by date/session)
+  - [ ] Setiap item: preview text (50-80 karakter pertama), timestamp, clickable
+  - [ ] Klik item → load history percakapan tersebut ke chat view
+  - [ ] Responsive: sidebar collapsible di mobile (hamburger/toggle)
+  - [ ] Active state: percakapan yang sedang aktif di-highlight
+  - [ ] Empty state: "No conversations yet"
+- **Acceptance**: Sidebar muncul di kiri chat, menampilkan list percakapan, bisa diklik untuk lihat history
+
+---
+
 # EPIC-9 — VPS Deploy (setelah MVP lokal selesai)
 
 > Semua tugas di epic ini dijalankan **setelah** MVP berfungsi sepenuhnya di laptop.
@@ -412,6 +430,7 @@ timeline
         PUB-30 Memory panel : read-only
         PUB-31 Token usage bar : progress bar
         PUB-71 Polish & responsive : UI finalisasi
+        PUB-72 History sidebar : percakapan sebelumnya
     section Phase 2 — Tool & SOUL (lokal)
         PUB-40 Tool request backend
         PUB-41 Tool request UI
@@ -435,12 +454,12 @@ timeline
 | EPIC-2 Auth | PUB-10, PUB-11, PUB-12, PUB-13 | 2+3+2+2 = 9 | MVP lokal |
 | EPIC-3 Chat | PUB-20, PUB-21, PUB-22 | 2+4+5 = 11 | MVP lokal |
 | EPIC-4 Memory & Token | PUB-30, PUB-31 | 2+2 = 4 | MVP lokal |
-| EPIC-8 Polish | PUB-71 | 2 | MVP lokal |
+| EPIC-8 Polish & History | PUB-71, PUB-72 | 2+3 = 5 | MVP lokal |
 | EPIC-5 Tool Request | PUB-40, PUB-41 | 2+2 = 4 | Phase 2 lokal |
 | EPIC-6 SOUL Request | PUB-50, PUB-51 | 2+2 = 4 | Phase 2 lokal |
 | EPIC-7 Admin Integration | PUB-60 | 3 | Phase 2 lokal |
 | EPIC-9 VPS Deploy | PUB-90, PUB-91, PUB-92, PUB-70 | 2+1+1+1 = 5 | VPS deploy |
-| **Total** | **19 issues** | **45** | |
+| **Total** | **20 issues** | **48** | |
 
 **MVP lokal**: 10 issues, ~27 SP (~13.5 hari kerja)
 **Phase 2 lokal**: 5 issues, ~11 SP (~5.5 hari kerja)
