@@ -538,6 +538,8 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/webp': 'webp',
   'audio/mpeg': 'mp3',
   'video/mp4': 'mp4',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
 }
 
 function mimeTypeToExt(mimeType: string): string | null {
@@ -563,6 +565,8 @@ const EXT_TO_MIME: Record<string, string> = {
   webp: 'image/webp',
   mp3: 'audio/mpeg',
   mp4: 'video/mp4',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   js: 'application/javascript',
   ts: 'text/typescript',
   py: 'text/x-python',
