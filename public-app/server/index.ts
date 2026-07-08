@@ -1,11 +1,24 @@
-import { Hono } from 'hono'
-import { serve } from '@hono/node-server'
+import { Hono } from "hono";
+import { serve } from "@hono/node-server";
+import { runMigrations } from "./migrate";
+import { seedDevUser } from "./auth";
 
-const app = new Hono()
+// ─── Init ───
+runMigrations();
+if (process.env.DEV_MODE === "true") {
+  const devUser = await seedDevUser();
+  console.log(
+    `[gezytech-public] Dev user seeded: ${devUser.email} (agent: ${devUser.agentSlug})`,
+  );
+}
 
-app.get('/api/health', (c) => c.json({ status: 'ok', service: 'gezytech-public' }))
+const app = new Hono();
 
-const port = Number(process.env.PORT) || 3002
-console.log(`[gezytech-public] Server started on port ${port}`)
+app.get("/api/health", (c) =>
+  c.json({ status: "ok", service: "gezytech-public" }),
+);
 
-serve({ fetch: app.fetch, port })
+const port = Number(process.env.PORT) || 3002;
+console.log(`[gezytech-public] Server started on port ${port}`);
+
+serve({ fetch: app.fetch, port });
