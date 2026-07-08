@@ -14,6 +14,7 @@ import {
   listUsers,
 } from "./auth";
 import { getDb } from "./db";
+import { sendChatMessage } from "./gezytech-client";
 
 // ─── Init ───
 runMigrations();
@@ -46,9 +47,7 @@ function checkRateLimit(ip: string): boolean {
 }
 
 function getDevUser() {
-  if (process.env.DEV_MODE === "true") {
-    return getUserByEmail("dev@gezy.tech");
-  }
+  if (process.env.DEV_MODE === "true") return getUserByEmail("dev@gezy.tech");
   return null;
 }
 
@@ -64,9 +63,8 @@ app.post("/api/auth/login", async (c) => {
     email?: string;
     password?: string;
   }>();
-  if (!email || !password) {
+  if (!email || !password)
     return c.json({ error: "Email and password are required" }, 400);
-  }
   const user = getUserByEmail(email);
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     return c.json({ error: "Invalid email or password" }, 401);
@@ -151,7 +149,6 @@ function adminAuth(c: any, next: any) {
   return next();
 }
 
-// Create user (admin)
 app.post("/api/admin/users", adminAuth, async (c) => {
   const { email, password, displayName, agentSlug } = await c.req.json<{
     email?: string;
@@ -159,12 +156,11 @@ app.post("/api/admin/users", adminAuth, async (c) => {
     displayName?: string;
     agentSlug?: string;
   }>();
-  if (!email || !password || !agentSlug) {
+  if (!email || !password || !agentSlug)
     return c.json(
       { error: "email, password, and agentSlug are required" },
       400,
     );
-  }
   try {
     const user = await createUser({ email, password, displayName, agentSlug });
     return c.json(
@@ -185,7 +181,6 @@ app.post("/api/admin/users", adminAuth, async (c) => {
   }
 });
 
-// List users (admin)
 app.get("/api/admin/users", adminAuth, (c) => {
   const users = listUsers().map((u) => ({
     id: u.id,
@@ -197,13 +192,114 @@ app.get("/api/admin/users", adminAuth, (c) => {
   return c.json({ users });
 });
 
-// Delete user (admin)
 app.delete("/api/admin/users/:id", adminAuth, (c) => {
   const id = c.req.param("id");
   const db = getDb();
   const result = db.run("DELETE FROM users WHERE id=?", [id]);
   if (result.changes === 0) return c.json({ error: "User not found" }, 404);
   return c.json({ success: true });
+});
+
+// ─── Chat (SSE stream) ───
+
+app.post("/api/chat", requireAuth, async (c) => {
+  const user: any = c.get("user");
+  const agentSlug = user.agentSlug;
+  const { message } = await c.req.json<{ message?: string }>();
+  if (!message) return c.json({ error: "Message is required" }, 400);
+
+  let totalInput = 0;
+  let totalOutput = 0;
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      const send = (data: string) =>
+        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+
+      try {
+        for await (const event of sendChatMessage(agentSlug, message)) {
+          if (event.type === "text") {
+            send(JSON.stringify({ type: "text", content: event.data }));
+          } else if (event.type === "tool_call") {
+            send(JSON.stringify({ type: "tool_call", data: event.data }));
+          } else if (event.type === "token") {
+            totalInput = event.data.inputTokens;
+            totalOutput = event.data.outputTokens;
+            send(JSON.stringify({ type: "token", ...event.data }));
+          } else if (event.type === "done") {
+            send(JSON.stringify({ type: "done" }));
+          } else if (event.type === "error") {
+            send(JSON.stringify({ type: "error", message: event.data }));
+          }
+        }
+
+        if (totalInput > 0 || totalOutput > 0) {
+          const db = getDb();
+          db.run(
+            "INSERT INTO token_usage (id, user_id, input_tokens, output_tokens, total_tokens, created_at) VALUES (?,?,?,?,?,?)",
+            [
+              crypto.randomUUID(),
+              user.id,
+              totalInput,
+              totalOutput,
+              totalInput + totalOutput,
+              Date.now(),
+            ],
+          );
+        }
+      } catch (err: any) {
+        send(
+          JSON.stringify({
+            type: "error",
+            message: err.message || "Chat failed",
+          }),
+        );
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+});
+
+app.get("/api/chat/history", requireAuth, (c) => {
+  return c.json({
+    messages: [],
+    note: "History will be proxied to gezytech after PUB-20",
+  });
+});
+
+// ─── Token usage ───
+
+app.get("/api/token-usage", requireAuth, (c) => {
+  const user: any = c.get("user");
+  const db = getDb();
+  const result = db
+    .query<{
+      total: number;
+      input: number;
+      output: number;
+      count: number;
+    }>("SELECT COALESCE(SUM(input_tokens),0) as input, COALESCE(SUM(output_tokens),0) as output, COALESCE(SUM(total_tokens),0) as total, COUNT(*) as count FROM token_usage WHERE user_id=?")
+    .get(user.id) ?? { total: 0, input: 0, output: 0, count: 0 };
+  return c.json(result);
+});
+
+// ─── Memory (stub — will proxy to gezytech later) ───
+
+app.get("/api/memory", requireAuth, (c) => {
+  return c.json({
+    memories: [],
+    note: "Memory will be proxied to gezytech after PUB-20",
+  });
 });
 
 // ─── Start ───
