@@ -27,10 +27,6 @@ async function gezytechApi(path: string, options?: RequestInit) {
   return res;
 }
 
-/**
- * Kirim pesan ke agent via gezytech API.
- * Return AsyncGenerator yang yield SSE events: { type, data }
- */
 export async function* sendChatMessage(
   agentSlug: string,
   message: string,
@@ -44,18 +40,13 @@ export async function* sendChatMessage(
     body: JSON.stringify({ content: message }),
   });
   const enqueueData = await enqueueRes.json();
-  const messageId = enqueueData.messageId as string;
-  if (!messageId) throw new Error("Failed to enqueue message");
+  if (!enqueueData.messageId) throw new Error("Failed to enqueue message");
 
   // Step 2: Poll for agent response
   const startTime = Date.now();
-  let lastMessageId = messageId;
-  let accumulatedContent = "";
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let done = false;
+  let seenIds = new Set<string>();
 
-  while (!done && Date.now() - startTime < MAX_POLL_TIME_MS) {
+  while (Date.now() - startTime < MAX_POLL_TIME_MS) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
 
     try {
@@ -63,40 +54,36 @@ export async function* sendChatMessage(
         `/api/agents/${agentSlug}/messages?limit=10`,
       );
       const pollData = await pollRes.json();
-      const newMessages = pollData.messages ?? [];
+      const newMessages: any[] = pollData.messages ?? [];
 
       for (const msg of newMessages) {
-        if (msg.id === lastMessageId) break; // already seen this
-        if (msg.messageType !== "agent") continue;
+        // Skip messages we've already seen
+        if (seenIds.has(msg.id)) continue;
+        seenIds.add(msg.id);
 
-        // Extract content and token info
-        const content = msg.content ?? "";
-        if (content) {
-          // Diff: only emit new content since last poll
-          if (content.length > accumulatedContent.length) {
-            const delta = content.slice(accumulatedContent.length);
-            accumulatedContent = content;
-            yield { type: "text", data: delta };
-          }
+        // Only process agent responses
+        if (msg.sourceType !== "agent") continue;
+
+        // Yield content
+        if (msg.content) {
+          yield { type: "text", data: msg.content };
         }
 
-        // Check if this is the final message in the turn
-        if (msg.finishReason === "stop" || msg.finishReason === "length") {
-          done = true;
-          inputTokens = msg.inputTokens ?? 0;
-          outputTokens = msg.outputTokens ?? 0;
-          yield { type: "token", data: { inputTokens, outputTokens } };
-          yield { type: "done" };
-          return;
+        // Yield token usage
+        if (msg.tokenUsage) {
+          yield {
+            type: "token",
+            data: {
+              inputTokens: msg.tokenUsage.inputTokens ?? 0,
+              outputTokens: msg.tokenUsage.outputTokens ?? 0,
+            },
+          };
         }
+
+        yield { type: "done" };
+        return;
       }
-
-      lastMessageId =
-        newMessages.length > 0
-          ? newMessages[newMessages.length - 1].id
-          : lastMessageId;
     } catch (err: any) {
-      // If agent not found, stop polling
       if (err.message?.includes("404")) {
         yield {
           type: "error",
@@ -107,10 +94,5 @@ export async function* sendChatMessage(
     }
   }
 
-  // Timeout or no response
-  if (accumulatedContent) {
-    yield { type: "done" };
-  } else {
-    yield { type: "error", data: "Agent did not respond within timeout" };
-  }
+  yield { type: "error", data: "Agent did not respond within timeout" };
 }
