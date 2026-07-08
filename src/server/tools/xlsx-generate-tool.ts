@@ -35,7 +35,7 @@ async function buildXlsxBase64(
  */
 export const generateXlsxTool: ToolRegistration = {
   availability: ['main'],
-  create: () =>
+  create: (createCtx) =>
     tool({
       description:
         'Create an Excel (.xlsx) spreadsheet from tabular data and get a shareable URL. ' +
@@ -58,18 +58,18 @@ export const generateXlsxTool: ToolRegistration = {
           .optional()
           .describe('File name without extension. Defaults to "spreadsheet".'),
       }),
-      execute: async ({ sheets, filename }, ctx) => {
+      execute: async ({ sheets, filename }) => {
         try {
           const base64 = await buildXlsxBase64(sheets)
           const name = filename || 'spreadsheet'
 
-          const file = await createFileFromContent(ctx.agentId, name, base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', {
+          const file = await createFileFromContent(createCtx.agentId, name, base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', {
             isBase64: true,
             description: `XLSX spreadsheet (${sheets.length} sheet(s))`,
-            createdByAgentId: ctx.agentId,
+            createdByAgentId: createCtx.agentId,
           })
 
-          log.info({ agentId: ctx.agentId, fileName: file.name, sheets: sheets.length }, 'XLSX generated')
+          log.info({ agentId: createCtx.agentId, fileName: file.name, sheets: sheets.length }, 'XLSX generated')
 
           return {
             success: true,
@@ -80,7 +80,7 @@ export const generateXlsxTool: ToolRegistration = {
           }
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err)
-          log.error({ agentId: ctx.agentId, err: msg }, 'Failed to generate XLSX')
+          log.error({ agentId: createCtx.agentId, err: msg }, 'Failed to generate XLSX')
           return {
             success: false,
             error: `Failed to generate XLSX: ${msg}`,
