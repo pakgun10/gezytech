@@ -31,6 +31,8 @@ import {
 } from "./tool-request";
 
 // ─── Init ───
+const GEZYTECH_URL = process.env.GEZYTECH_API_URL ?? "http://localhost:3000";
+const SERVICE_TOKEN = process.env.GEZYTECH_SERVICE_TOKEN ?? "dev-token-shared";
 runMigrations();
 if (process.env.DEV_MODE === "true") {
   const devUser = await seedDevUser();
@@ -379,6 +381,17 @@ app.patch("/api/admin/soul-requests/:id", adminAuth, async (c) => {
   if (action === "approve") {
     const updated = approveSoulRequest(id, adminNote);
     if (!updated) return c.json({ error: "Request not found" }, 404);
+    // Auto-apply SOUL to gezytech agent
+    try {
+      const soulUser = getUserById(updated.userId);
+      if (soulUser) {
+        await fetch(`${GEZYTECH_URL}/api/agents/${soulUser.agentSlug}`, {
+          method: "PATCH",
+          headers: { "x-service-token": SERVICE_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify({ character: updated.soulText }),
+        });
+      }
+    } catch { /* non-critical */ }
     return c.json({ request: updated });
   }
   if (action === "reject") {
@@ -422,6 +435,26 @@ app.patch("/api/admin/tool-requests/:id", adminAuth, async (c) => {
   if (action === "approve") {
     const updated = approveToolRequest(id, adminNote);
     if (!updated) return c.json({ error: "Request not found" }, 404);
+    // Auto-apply tool grant to gezytech agent
+    try {
+      const toolUser = getUserById(updated.userId);
+      if (toolUser) {
+        const agentRes = await fetch(`${GEZYTECH_URL}/api/agents/${toolUser.agentSlug}`, {
+          headers: { "x-service-token": SERVICE_TOKEN },
+        });
+        if (agentRes.ok) {
+          const agentData: any = await agentRes.json();
+          const currentExtra: string[] = agentData.extraToolNames ?? [];
+          if (!currentExtra.includes(updated.toolName)) {
+            await fetch(`${GEZYTECH_URL}/api/agents/${toolUser.agentSlug}`, {
+              method: "PATCH",
+              headers: { "x-service-token": SERVICE_TOKEN, "Content-Type": "application/json" },
+              body: JSON.stringify({ extraToolNames: [...currentExtra, updated.toolName] }),
+            });
+          }
+        }
+      }
+    } catch { /* non-critical */ }
     return c.json({ request: updated });
   }
   if (action === "reject") {

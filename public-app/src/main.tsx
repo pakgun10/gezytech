@@ -3,10 +3,54 @@ import { createRoot } from "react-dom/client";
 import { useAuth } from "./useAuth";
 import { LoginPage } from "./LoginPage";
 import { ChatPage } from "./ChatPage";
+import { AdminPanel } from "./AdminPanel";
 import "./style.css";
 
 function App() {
   const { user, loading, login, logout } = useAuth();
+
+  // Admin route
+  const isAdmin = window.location.pathname === "/admin";
+  if (isAdmin) {
+    return (
+      <div
+        style={{
+          fontFamily: "system-ui",
+          background: "#fafafa",
+          minHeight: "100vh",
+        }}
+      >
+        <div
+          className="top-bar"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "8px 16px",
+            borderBottom: "1px solid #e5e5e5",
+            background: "#fafafa",
+          }}
+        >
+          <span
+            className="top-bar-title"
+            style={{ fontWeight: 700, fontSize: 16 }}
+          >
+            GezyTech{" "}
+            <span style={{ fontWeight: 400, color: "#9ca3af", fontSize: 13 }}>
+              / Admin
+            </span>
+          </span>
+          <a
+            href="/"
+            style={{ fontSize: 13, color: "#2563eb", textDecoration: "none" }}
+          >
+            ← Back to chat
+          </a>
+        </div>
+        <AdminPanel />
+      </div>
+    );
+  }
 
   if (loading) {
     return (
