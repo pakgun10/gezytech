@@ -14,6 +14,15 @@ const MAX_POLL_TIME_MS = 120_000;
 // Track already-seen message IDs across calls so old responses are never replayed
 const globalSeenIds = new Map<string, Set<string>>();
 
+function getSeenIds(agentSlug: string): Set<string> {
+  let ids = globalSeenIds.get(agentSlug);
+  if (!ids) {
+    ids = new Set();
+    globalSeenIds.set(agentSlug, ids);
+  }
+  return ids;
+}
+
 async function gezytechApi(path: string, options?: RequestInit) {
   const res = await fetch(`${GEZYTECH_URL}${path}`, {
     ...options,
@@ -30,10 +39,11 @@ async function gezytechApi(path: string, options?: RequestInit) {
   return res;
 }
 
-/** Poll for agent response, skipping already-seen message IDs */
+/** Poll for agent response, skipping already-seen message IDs and messages created before anchorTimeMs */
 async function* pollAgentResponse(
   agentSlug: string,
   seenIds: Set<string>,
+  anchorTimeMs: number,
 ): AsyncGenerator<{
   type: "text" | "tool_call" | "token" | "done" | "error";
   data?: any;
@@ -55,6 +65,11 @@ async function* pollAgentResponse(
         seenIds.add(msg.id);
 
         if (msg.sourceType !== "agent") continue;
+
+        // Only accept messages created AFTER the user message was enqueued.
+        // This prevents replaying agent responses from previous turns.
+        const msgTime = msg.createdAt ? new Date(msg.createdAt).getTime() : 0;
+        if (msgTime <= anchorTimeMs) continue;
 
         if (msg.content) {
           yield { type: "text", data: msg.content };
@@ -95,12 +110,7 @@ export async function* sendChatMessage(
   type: "text" | "tool_call" | "token" | "done" | "error";
   data?: any;
 }> {
-  // Track seen message IDs across both poll phases so we never replay old responses
-  let seenIds = globalSeenIds.get(agentSlug);
-  if (!seenIds) {
-    seenIds = new Set<string>();
-    globalSeenIds.set(agentSlug, seenIds);
-  }
+  const seenIds = getSeenIds(agentSlug);
 
   // If preInstruction is provided, send it first and wait for it to be processed
   if (preInstruction) {
@@ -113,14 +123,22 @@ export async function* sendChatMessage(
       throw new Error("Failed to enqueue pre-instruction");
 
     // Wait for the agent to process the instruction (consume but don't yield)
-    for await (const _event of pollAgentResponse(agentSlug, seenIds)) {
+    const preAnchor = Date.now();
+    for await (const _event of pollAgentResponse(
+      agentSlug,
+      seenIds,
+      preAnchor,
+    )) {
       if (_event.type === "done" || _event.type === "error") break;
     }
-    // Small delay to ensure agent state is settled
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  // Step 1: Enqueue real message
+  // Record anchor timestamp BEFORE enqueue.
+  // Only messages with createdAt > anchorTimeMs are responses to THIS message.
+  const anchorTimeMs = Date.now();
+
+  // Enqueue real message
   const enqueueRes = await gezytechApi(`/api/agents/${agentSlug}/messages`, {
     method: "POST",
     body: JSON.stringify({ content: message }),
@@ -128,6 +146,6 @@ export async function* sendChatMessage(
   const enqueueData = await enqueueRes.json();
   if (!enqueueData.messageId) throw new Error("Failed to enqueue message");
 
-  // Step 2: Poll for agent response (shares seenIds with preInstruction phase)
-  yield* pollAgentResponse(agentSlug, seenIds);
+  // Poll for agent response — only accept messages created AFTER anchorTimeMs
+  yield* pollAgentResponse(agentSlug, seenIds, anchorTimeMs);
 }
