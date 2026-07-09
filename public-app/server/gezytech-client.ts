@@ -27,22 +27,11 @@ async function gezytechApi(path: string, options?: RequestInit) {
   return res;
 }
 
-export async function* sendChatMessage(
-  agentSlug: string,
-  message: string,
-): AsyncGenerator<{
+/** Send a message and poll for response from agent */
+async function* pollAgentResponse(agentSlug: string): AsyncGenerator<{
   type: "text" | "tool_call" | "token" | "done" | "error";
   data?: any;
 }> {
-  // Step 1: Enqueue message
-  const enqueueRes = await gezytechApi(`/api/agents/${agentSlug}/messages`, {
-    method: "POST",
-    body: JSON.stringify({ content: message }),
-  });
-  const enqueueData = await enqueueRes.json();
-  if (!enqueueData.messageId) throw new Error("Failed to enqueue message");
-
-  // Step 2: Poll for agent response
   const startTime = Date.now();
   let seenIds = new Set<string>();
 
@@ -57,19 +46,15 @@ export async function* sendChatMessage(
       const newMessages: any[] = pollData.messages ?? [];
 
       for (const msg of newMessages) {
-        // Skip messages we've already seen
         if (seenIds.has(msg.id)) continue;
         seenIds.add(msg.id);
 
-        // Only process agent responses
         if (msg.sourceType !== "agent") continue;
 
-        // Yield content
         if (msg.content) {
           yield { type: "text", data: msg.content };
         }
 
-        // Yield token usage
         if (msg.tokenUsage) {
           yield {
             type: "token",
@@ -95,4 +80,42 @@ export async function* sendChatMessage(
   }
 
   yield { type: "error", data: "Agent did not respond within timeout" };
+}
+
+export async function* sendChatMessage(
+  agentSlug: string,
+  message: string,
+  preInstruction?: string,
+): AsyncGenerator<{
+  type: "text" | "tool_call" | "token" | "done" | "error";
+  data?: any;
+}> {
+  // If preInstruction is provided, send it first and wait for it to be processed
+  if (preInstruction) {
+    const preRes = await gezytechApi(`/api/agents/${agentSlug}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content: preInstruction }),
+    });
+    const preData = await preRes.json();
+    if (!preData.messageId)
+      throw new Error("Failed to enqueue pre-instruction");
+
+    // Wait for the agent to process the instruction (consume but don't yield)
+    for await (const _event of pollAgentResponse(agentSlug)) {
+      if (_.event?.type === "done" || _.event?.type === "error") break;
+    }
+    // Small delay to ensure agent state is settled
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  // Step 1: Enqueue real message
+  const enqueueRes = await gezytechApi(`/api/agents/${agentSlug}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ content: message }),
+  });
+  const enqueueData = await enqueueRes.json();
+  if (!enqueueData.messageId) throw new Error("Failed to enqueue message");
+
+  // Step 2: Poll for agent response
+  yield* pollAgentResponse(agentSlug);
 }
