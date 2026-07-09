@@ -41,6 +41,9 @@ npm_token
 
 # Data (SQLite DB, uploads, workspaces)
 /data/
+public-app/data/*.db
+public-app/data/*.db-shm
+public-app/data/*.db-wal
 
 # VSCode
 .vscode/

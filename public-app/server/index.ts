@@ -286,7 +286,10 @@ app.post("/api/admin/sync-agents", adminAuth, async (c) => {
 app.post("/api/chat", requireAuth, async (c) => {
   const user: any = c.get("user");
   const agentSlug = user.agentSlug;
-  const { message } = await c.req.json<{ message?: string }>();
+  const { message, sessionId } = await c.req.json<{
+    message?: string;
+    sessionId?: string;
+  }>();
   if (!message) return c.json({ error: "Message is required" }, 400);
 
   const finalMessage = message;
@@ -301,7 +304,7 @@ app.post("/api/chat", requireAuth, async (c) => {
         controller.enqueue(encoder.encode(`data: ${data}\n\n`));
 
       try {
-        for await (const event of sendChatMessage(agentSlug, message)) {
+        for await (const event of sendChatMessage(agentSlug, message, undefined, sessionId)) {
           if (event.type === "text") {
             send(JSON.stringify({ type: "text", content: event.data }));
           } else if (event.type === "tool_call") {
@@ -357,14 +360,16 @@ app.post("/api/chat", requireAuth, async (c) => {
 app.get("/api/chat/history", requireAuth, async (c) => {
   const user: any = c.get("user");
   const agentSlug = user.agentSlug;
+  const sessionId = c.req.query("sessionId");
 
   try {
+    const params = new URLSearchParams({ limit: "100" });
+    if (sessionId) params.set("sessionId", sessionId);
     const res = await fetch(
-      `${process.env.GEZYTECH_API_URL ?? "http://localhost:3000"}/api/agents/${agentSlug}/messages?limit=100`,
+      `${GEZYTECH_URL}/api/agents/${agentSlug}/messages?${params.toString()}`,
       {
         headers: {
-          "x-service-token":
-            process.env.GEZYTECH_SERVICE_TOKEN ?? "dev-token-shared",
+          "x-service-token": SERVICE_TOKEN,
         },
       },
     );
@@ -427,61 +432,158 @@ app.get("/api/memory", requireAuth, async (c) => {
   }
 });
 
-// ─── Chat Sessions ───
+// ─── Chat Sessions — proxy to gezytech quick-sessions ───
 
 app.post("/api/session/new", requireAuth, async (c) => {
   const user: any = c.get("user");
+  const agentSlug = user.agentSlug;
   const { title } = (await c.req.json<{ title?: string }>()) ?? {};
-  const db = getDb();
-  const id = crypto.randomUUID();
-  const now = Date.now();
-  db.run(
-    "INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at) VALUES (?,?,?,?,?)",
-    [id, user.id, title ?? null, now, now],
-  );
-  return c.json(
-    { session: { id, title: title ?? null, createdAt: now, updatedAt: now } },
-    201,
-  );
+
+  async function createSession() {
+    return fetch(
+      `${GEZYTECH_URL}/api/agents/${agentSlug}/quick-sessions`,
+      {
+        method: "POST",
+        headers: {
+          "x-service-token": SERVICE_TOKEN,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ title }),
+      },
+    );
+  }
+
+  try {
+    let res = await createSession();
+
+    // If max active sessions reached, close the oldest active session and retry
+    if (res.status === 409) {
+      try {
+        const listRes = await fetch(
+          `${GEZYTECH_URL}/api/agents/${agentSlug}/quick-sessions?status=active&limit=50`,
+          { headers: { "x-service-token": SERVICE_TOKEN } },
+        );
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          const sessions = listData.sessions ?? [];
+          // Sort ascending by createdAt (oldest first)
+          sessions.sort((a: any, b: any) => a.createdAt - b.createdAt);
+          const oldest = sessions[0];
+          if (oldest) {
+            await fetch(`${GEZYTECH_URL}/api/quick-sessions/${oldest.id}/close`, {
+              method: "POST",
+              headers: {
+                "x-service-token": SERVICE_TOKEN,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({}),
+            });
+            res = await createSession();
+          }
+        }
+      } catch {
+        // Ignore close errors and return the original 409 response below
+      }
+    }
+
+    if (!res.ok) {
+      const text = await res.text();
+      return c.json({ error: `Failed to create session: ${text.slice(0, 200)}` }, res.status as any);
+    }
+    const data = await res.json();
+    return c.json(
+      {
+        session: {
+          id: data.id,
+          title: data.title,
+          createdAt: data.createdAt,
+          updatedAt: data.createdAt,
+        },
+      },
+      201,
+    );
+  } catch (err: any) {
+    return c.json({ error: err.message }, 502);
+  }
 });
 
-app.get("/api/sessions", requireAuth, (c) => {
+app.get("/api/sessions", requireAuth, async (c) => {
   const user: any = c.get("user");
-  const db = getDb();
-  const rows = db
-    .query<
-      ChatSession,
-      [string]
-    >("SELECT id, user_id as userId, title, created_at as createdAt, updated_at as updatedAt FROM chat_sessions WHERE user_id=? ORDER BY created_at DESC")
-    .all(user.id);
-  return c.json({ sessions: rows });
+  const agentSlug = user.agentSlug;
+
+  try {
+    const res = await fetch(
+      `${GEZYTECH_URL}/api/agents/${agentSlug}/quick-sessions?status=all&limit=50`,
+      {
+        headers: { "x-service-token": SERVICE_TOKEN },
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      return c.json({ error: `Failed to fetch sessions: ${text.slice(0, 200)}` }, 502);
+    }
+    const data = await res.json();
+    const sessions = (data.sessions ?? []).map((s: any) => ({
+      id: s.id,
+      title: s.title,
+      createdAt: s.createdAt,
+      updatedAt: s.createdAt,
+    }));
+    return c.json({ sessions });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 502);
+  }
 });
 
 app.patch("/api/sessions/:id", requireAuth, async (c) => {
   const user: any = c.get("user");
   const id = c.req.param("id");
   const { title } = (await c.req.json<{ title?: string }>()) ?? {};
-  const db = getDb();
-  const now = Date.now();
-  db.run(
-    "UPDATE chat_sessions SET title=?, updated_at=? WHERE id=? AND user_id=?",
-    [title ?? null, now, id, user.id],
-  );
-  const row = db
-    .query<
-      ChatSession,
-      [string, string]
-    >("SELECT id, user_id as userId, title, created_at as createdAt, updated_at as updatedAt FROM chat_sessions WHERE id=? AND user_id=?")
-    .get(id, user.id);
-  return c.json({ session: row ?? null });
+
+  try {
+    const res = await fetch(`${GEZYTECH_URL}/api/quick-sessions/${id}`, {
+      method: "PATCH",
+      headers: {
+        "x-service-token": SERVICE_TOKEN,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return c.json({ error: `Failed to update session: ${text.slice(0, 200)}` }, res.status as any);
+    }
+    const data = await res.json();
+    return c.json({
+      session: {
+        id: data.id,
+        title: data.title,
+        createdAt: data.createdAt,
+        updatedAt: data.createdAt,
+      },
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 502);
+  }
 });
 
-app.delete("/api/sessions/:id", requireAuth, (c) => {
+app.delete("/api/sessions/:id", requireAuth, async (c) => {
   const user: any = c.get("user");
   const id = c.req.param("id");
-  const db = getDb();
-  db.run("DELETE FROM chat_sessions WHERE id=? AND user_id=?", [id, user.id]);
-  return c.json({ success: true });
+
+  try {
+    const res = await fetch(`${GEZYTECH_URL}/api/quick-sessions/${id}`, {
+      method: "DELETE",
+      headers: { "x-service-token": SERVICE_TOKEN },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return c.json({ error: `Failed to delete session: ${text.slice(0, 200)}` }, res.status as any);
+    }
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 502);
+  }
 });
 
 // ─── SOUL Requests ───

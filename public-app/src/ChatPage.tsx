@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { MemoryPanel } from "./MemoryPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { SoulRequestButton } from "./SoulRequestButton";
@@ -27,14 +27,16 @@ export function ChatPage({
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [sessionError, setSessionError] = useState(false);
   const [viewingHistory, setViewingHistory] = useState(false);
-  const [allMessages, setAllMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionMessageCount, setSessionMessageCount] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Load chat history on mount
-  useEffect(() => {
-    fetch("/api/chat/history")
+  const loadHistory = useCallback((sid: string | null) => {
+    setLoadingHistory(true);
+    const url = sid
+      ? `/api/chat/history?sessionId=${encodeURIComponent(sid)}`
+      : "/api/chat/history";
+    fetch(url)
       .then((r) => {
         if (r.status === 401) {
           setSessionError(true);
@@ -51,19 +53,21 @@ export function ChatPage({
             content: m.content,
             timestamp: m.timestamp,
           }));
-          setAllMessages(formatted);
           setMessages(formatted);
+        } else {
+          setMessages([]);
         }
       })
-      .catch(() => {})
+      .catch(() => setMessages([]))
       .finally(() => setLoadingHistory(false));
+  }, []);
 
-    // Fetch active session or create one
+  // Resolve active session on mount (URL session, latest, or create new)
+  useEffect(() => {
     fetch("/api/sessions")
       .then((r) => r.json())
       .then((data) => {
         const sessions = data.sessions ?? [];
-        // If URL has a session ID, use that; otherwise use latest
         if (initialSessionId) {
           setSessionId(initialSessionId);
         } else if (sessions.length > 0) {
@@ -88,23 +92,24 @@ export function ChatPage({
       .catch(() => {});
   }, []);
 
+  // Load history whenever the active session changes
+  useEffect(() => {
+    loadHistory(sessionId);
+  }, [sessionId, loadHistory]);
+
   // Called when user selects a session from HistoryPanel
   const handleSelectHistory = (session: {
     id: string;
     title: string | null;
     createdAt: number;
   }) => {
-    // For now, show all messages (agent remembers everything via compacting)
-    setMessages(allMessages);
     setSessionId(session.id);
     setViewingHistory(false);
-    setLoadingHistory(false);
     setSessionMessageCount(0);
     window.history.pushState(null, "", `/c/${session.id}`);
   };
 
   const handleBackToLatest = () => {
-    setMessages(allMessages);
     setViewingHistory(false);
     window.history.pushState(null, "", "/");
     fetch("/api/sessions")
@@ -118,13 +123,17 @@ export function ChatPage({
 
   const handleNewSession = async () => {
     try {
-      const n = (allMessages?.length || 0) + 1;
+      const n = (messages?.length || 0) + 1;
       const res = await fetch("/api/session/new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "Chat " + n }),
       });
       const data = await res.json();
+      if (data.error) {
+        console.error("Failed to create session:", data.error);
+        return;
+      }
       if (data.session) {
         setSessionId(data.session.id);
         setMessages([]);
@@ -161,7 +170,7 @@ export function ChatPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
-          isNewSession: sessionMessageCount === 0,
+          sessionId: sessionId ?? undefined,
         }),
       });
 

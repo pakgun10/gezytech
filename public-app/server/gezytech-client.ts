@@ -106,6 +106,7 @@ export async function* sendChatMessage(
   agentSlug: string,
   message: string,
   preInstruction?: string,
+  sessionId?: string,
 ): AsyncGenerator<{
   type: "text" | "tool_call" | "token" | "done" | "error";
   data?: any;
@@ -139,9 +140,11 @@ export async function* sendChatMessage(
   const anchorTimeMs = Date.now();
 
   // Enqueue real message
+  const enqueueBody: Record<string, string> = { content: message };
+  if (sessionId) enqueueBody.sessionId = sessionId;
   const enqueueRes = await gezytechApi(`/api/agents/${agentSlug}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content: message }),
+    body: JSON.stringify(enqueueBody),
   });
   const enqueueData = await enqueueRes.json();
   if (!enqueueData.messageId) throw new Error("Failed to enqueue message");

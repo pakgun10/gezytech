@@ -6,7 +6,7 @@
 
 ## 1. Executive Summary
 
-**GezyTech Platform** adalah aplikasi user dashboard untuk pengguna akhir GezyTech (`platform.gezytech.com`). Berbeda dengan web chat (`gezytech.com`) yang fokus ke percakapan agent, platform app fokus ke **akun, pemakaian, dan pembayaran**.
+**GezyTech Platform** adalah aplikasi user dashboard untuk pengguna akhir GezyTech (`platform.gezytech.web.id`). Berbeda dengan web chat (`gezytech.web.id`) yang fokus ke percakapan agent, platform app fokus ke **akun, pemakaian, dan pembayaran**.
 
 User login via SSO (better-auth), lalu mengakses:
 - 📊 **Usage** — lihat pemakaian token per hari/minggu
@@ -21,22 +21,22 @@ User login via SSO (better-auth), lalu mengakses:
 ### 2.1 Domain
 
 ```
-gezytech.com              → web chat (public-app :3002)
-platform.gezytech.com     → user dashboard (platform-app :3004)
-admin.gezytech.com        → admin panel (gezytech :3003) — sudah ada
-api.gezytech.com          → API (ke depannya kalau butuh)
+gezytech.web.id              → web chat (public-app :3002)
+platform.gezytech.web.id     → user dashboard (platform-app :3004)
+admin.gezytech.web.id        → admin panel (gezytech :3003) — sudah ada
+api.gezytech.web.id          → API (ke depannya kalau butuh)
 ```
 
 ### 2.2 Diagram alur login
 
 ```mermaid
 sequenceDiagram
-    User->>platform.gezytech.com: Buka dashboard
-    platform.gezytech.com->>gezytech.com: Redirect ke better-auth login
-    gezytech.com->>User: Form login
-    User->>gezytech.com: Submit email + password
-    gezytech.com-->>platform.gezytech.com: Set cookie session (domain=.gezytech.com)
-    platform.gezytech.com->>User: Dashboard (Usage + Profile)
+    User->>platform.gezytech.web.id: Buka dashboard
+    platform.gezytech.web.id->>gezytech.web.id: Redirect ke better-auth login
+    gezytech.web.id->>User: Form login
+    User->>gezytech.web.id: Submit email + password
+    gezytech.web.id-->>platform.gezytech.web.id: Set cookie session (domain=.gezytech.web.id)
+    platform.gezytech.web.id->>User: Dashboard (Usage + Profile)
 ```
 
 ### 2.3 Port & Security
@@ -52,7 +52,7 @@ sequenceDiagram
 
 Platform-app TIDAK membuat auth sendiri. Pakai better-auth dari gezytech:
 
-- Cookie session domain diset ke `.gezytech.com` → berlaku untuk semua subdomain
+- Cookie session domain diset ke `.gezytech.web.id` → berlaku untuk semua subdomain
 - Platform-app baca cookie `session` → verify ke gezytech `/api/auth/me`
 - User login sekali, berlaku di semua aplikasi (web chat + platform)
 
@@ -178,11 +178,11 @@ CREATE TABLE pricing_config (
 ### 5.1 Auth flow
 
 ```
-1. User buka platform.gezytech.com
-2. Tidak ada cookie "session" → redirect ke gezytech.com/login
+1. User buka platform.gezytech.web.id
+2. Tidak ada cookie "session" → redirect ke gezytech.web.id/login
 3. User login via better-auth (gezytech)
-4. better-auth set cookie session dengan domain=.gezytech.com
-5. Redirect balik ke platform.gezytech.com
+4. better-auth set cookie session dengan domain=.gezytech.web.id
+5. Redirect balik ke platform.gezytech.web.id
 6. Platform-app backend baca cookie → verify ke gezytech /api/auth/me
 7. User terautentikasi → tampilkan dashboard
 ```
@@ -192,7 +192,7 @@ CREATE TABLE pricing_config (
 ```
 1. User klik logout di platform
 2. Panggil gezytech /api/auth/logout
-3. Cookie dihapus (domain=.gezytech.com)
+3. Cookie dihapus (domain=.gezytech.web.id)
 4. Redirect ke landing page
 ```
 
@@ -409,7 +409,7 @@ gezytech/
 - [ ] Auto-approve on payment
 
 ### Phase 4 — VPS Deploy
-- [ ] Nginx: `platform.gezytech.com` → `:3004`
+- [ ] Nginx: `platform.gezytech.web.id` → `:3004`
 - [ ] HTTPS via certbot
 - [ ] systemd service
 
@@ -446,7 +446,7 @@ gezytech/
 - Untuk MVP lokal: simulasi dengan admin approve manual
 
 ### 11.4 SSO cookie domain
-- `.gezytech.com` di localhost tidak bisa diset (domain harus ada dot)
+- `.gezytech.web.id` di localhost tidak bisa diset (domain harus ada dot)
 - Solusi dev: `DEV_MODE=true` → bypass SSO → auto-login dev user
 - Solusi prod: Nginx + domain beneran
 
