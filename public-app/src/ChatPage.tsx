@@ -14,22 +14,14 @@ interface Message {
 }
 
 export function ChatPage({ agentSlug }: { agentSlug: string }) {
-  const loadHistory = (msgs: any[]) => {
-    setMessages(
-      msgs.map((m: any) => ({
-        id: m.id,
-        role: m.role === "user" ? "user" : "agent",
-        content: m.content,
-        timestamp: m.timestamp,
-      })),
-    );
-  };
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [sessionError, setSessionError] = useState(false);
+  const [viewingHistory, setViewingHistory] = useState(false);
+  const [allMessages, setAllMessages] = useState<Message[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Load chat history on mount
@@ -44,11 +36,45 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
         return r.json();
       })
       .then((data) => {
-        if (data?.messages) loadHistory(data.messages);
+        if (data?.messages) {
+          const formatted = data.messages.map((m: any) => ({
+            id: m.id,
+            role: m.role === "user" ? "user" : "agent",
+            content: m.content,
+            timestamp: m.timestamp,
+          }));
+          setAllMessages(formatted);
+          setMessages(formatted);
+        }
       })
       .catch(() => {})
       .finally(() => setLoadingHistory(false));
   }, []);
+
+  // Called when user selects a conversation from HistoryPanel
+  const handleSelectHistory = (
+    msgs: Array<{
+      id: string;
+      role: string;
+      content: string;
+      timestamp: number;
+    }>,
+  ) => {
+    setMessages(
+      msgs.map((m) => ({
+        id: m.id,
+        role: (m.role === "user" ? "user" : "agent") as Message["role"],
+        content: m.content,
+        timestamp: m.timestamp,
+      })),
+    );
+    setViewingHistory(true);
+  };
+
+  const handleBackToLatest = () => {
+    setMessages(allMessages);
+    setViewingHistory(false);
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -220,8 +246,25 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
           className="chat-header-btns"
           style={{ display: "flex", alignItems: "center", gap: 12 }}
         >
+          {viewingHistory && (
+            <button
+              onClick={handleBackToLatest}
+              style={{
+                padding: "6px 12px",
+                background: "#f3f4f6",
+                color: "#374151",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              ← Back to latest
+            </button>
+          )}
           <TokenBar />
-          <HistoryPanel />
+          <HistoryPanel onSelect={handleSelectHistory} />
           <ToolRequestButton />
           <SoulRequestButton />
           <MemoryPanel />
