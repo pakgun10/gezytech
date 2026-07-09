@@ -13,7 +13,13 @@ interface Message {
   timestamp: number;
 }
 
-export function ChatPage({ agentSlug }: { agentSlug: string }) {
+export function ChatPage({
+  agentSlug,
+  initialSessionId,
+}: {
+  agentSlug: string;
+  initialSessionId?: string;
+}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -57,7 +63,10 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
       .then((r) => r.json())
       .then((data) => {
         const sessions = data.sessions ?? [];
-        if (sessions.length > 0) {
+        // If URL has a session ID, use that; otherwise use latest
+        if (initialSessionId) {
+          setSessionId(initialSessionId);
+        } else if (sessions.length > 0) {
           setSessionId(sessions[0].id);
         } else {
           // No sessions yet — create first one
@@ -67,7 +76,13 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
             body: JSON.stringify({ title: "Chat 1" }),
           })
             .then((r) => r.json())
-            .then((d) => setSessionId(d.session?.id ?? null));
+            .then((d) => {
+              const sid = d.session?.id;
+              if (sid) {
+                setSessionId(sid);
+                window.history.replaceState(null, "", `/c/${sid}`);
+              }
+            });
         }
       })
       .catch(() => {});
@@ -85,11 +100,13 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
     setViewingHistory(false);
     setLoadingHistory(false);
     setSessionMessageCount(0);
+    window.history.pushState(null, "", `/c/${session.id}`);
   };
 
   const handleBackToLatest = () => {
     setMessages(allMessages);
     setViewingHistory(false);
+    window.history.pushState(null, "", "/");
     fetch("/api/sessions")
       .then((r) => r.json())
       .then((data) => {
@@ -113,6 +130,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
         setMessages([]);
         setViewingHistory(false);
         setSessionMessageCount(0);
+        window.history.pushState(null, "", `/c/${data.session.id}`);
       }
     } catch {}
   };

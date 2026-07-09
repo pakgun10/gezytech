@@ -66,6 +66,10 @@ function App() {
     return <LoginPage onLogin={login} />;
   }
 
+  // Extract session ID from URL: /c/<sessionId>
+  const pathMatch = window.location.pathname.match(/^\/c\/([a-zA-Z0-9-]+)/);
+  const urlSessionId = pathMatch ? pathMatch[1] : undefined;
+
   return (
     <div style={{ fontFamily: "system-ui" }}>
       {/* Top bar */}
@@ -80,12 +84,18 @@ function App() {
           background: "#fafafa",
         }}
       >
-        <span
+        <a
+          href="/"
           className="top-bar-title"
-          style={{ fontWeight: 700, fontSize: 16 }}
+          style={{
+            fontWeight: 700,
+            fontSize: 16,
+            color: "inherit",
+            textDecoration: "none",
+          }}
         >
           GezyTech
-        </span>
+        </a>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span
             className="top-bar-user"
@@ -112,7 +122,7 @@ function App() {
       </div>
 
       {/* Chat area */}
-      <ChatPage agentSlug={user.agentSlug} />
+      <ChatPage agentSlug={user.agentSlug} initialSessionId={urlSessionId} />
     </div>
   );
 }
