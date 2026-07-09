@@ -406,13 +406,25 @@ app.get("/api/token-usage", requireAuth, (c) => {
   return c.json(result);
 });
 
-// ─── Memory (stub — will proxy to gezytech later) ───
+// ─── Memory — proxy to gezytech ───
 
-app.get("/api/memory", requireAuth, (c) => {
-  return c.json({
-    memories: [],
-    note: "Memory will be proxied to gezytech after PUB-20",
-  });
+app.get("/api/memory", requireAuth, async (c) => {
+  const user: any = c.get("user");
+  const agentSlug = user.agentSlug;
+
+  try {
+    const res = await fetch(
+      `${GEZYTECH_URL}/api/agents/${agentSlug}/memories`,
+      { headers: { "x-service-token": SERVICE_TOKEN } },
+    );
+    if (!res.ok) {
+      return c.json({ memories: [] });
+    }
+    const data = await res.json();
+    return c.json({ memories: data.memories ?? [], total: data.total });
+  } catch {
+    return c.json({ memories: [] });
+  }
 });
 
 // ─── Chat Sessions ───
