@@ -78,28 +78,11 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
     title: string | null;
     createdAt: number;
   }) => {
-    // Filter messages from this session's time window
-    fetch("/api/sessions")
-      .then((r) => r.json())
-      .then((data) => {
-        const sessions = (data.sessions ?? []) as Array<{
-          id: string;
-          createdAt: number;
-        }>;
-        // Find next session after this one to get end boundary
-        const sorted = [...sessions].sort((a, b) => a.createdAt - b.createdAt);
-        const idx = sorted.findIndex((s) => s.id === session.id);
-        const endTime =
-          idx < sorted.length - 1 ? sorted[idx + 1].createdAt : Date.now();
-
-        const sessionMsgs = allMessages.filter(
-          (m) => m.timestamp >= session.createdAt && m.timestamp < endTime,
-        );
-        setMessages(sessionMsgs.length > 0 ? sessionMsgs : []);
-        setSessionId(session.id);
-        setViewingHistory(false);
-      })
-      .catch(() => {});
+    // For now, show all messages (agent remembers everything via compacting)
+    setMessages(allMessages);
+    setSessionId(session.id);
+    setViewingHistory(false);
+    setLoadingHistory(false);
   };
 
   const handleBackToLatest = () => {
