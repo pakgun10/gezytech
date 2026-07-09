@@ -225,7 +225,7 @@ app.post("/api/chat", requireAuth, async (c) => {
   if (!message) return c.json({ error: "Message is required" }, 400);
 
   const finalMessage = isNewSession
-    ? "[KONTEKS BARU — User memulai sesi percakapan baru. Abaikan semua percakapan sebelumnya. Mulai dari awal dengan sapaan hangat dalam Bahasa Indonesia.]\n\n" + message
+    ? "[SYSTEM: NEW SESSION — Semua percakapan sebelumnya DIHAPUS. Kamu adalah asisten berbahasa Indonesia. JANGAN gunakan bahasa Prancis, Inggris, atau bahasa lain. Mulai dari nol. Sapaan pertama: 'Halo! Ada yang bisa saya bantu?']\n\n" + message
     : message;
 
   let totalInput = 0;
