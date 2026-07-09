@@ -216,17 +216,80 @@ app.delete("/api/admin/users/:id", adminAuth, (c) => {
   return c.json({ success: true });
 });
 
+// Sync agent slugs — when agent renamed in gezytech, update public-app user mappings
+app.post("/api/admin/sync-agents", adminAuth, async (c) => {
+  try {
+    // Fetch all agents from gezytech
+    const agentRes = await fetch(`${GEZYTECH_URL}/api/agents`, {
+      headers: { "x-service-token": SERVICE_TOKEN },
+    });
+    if (!agentRes.ok) {
+      return c.json(
+        { error: `Failed to fetch agents from gezytech: ${agentRes.status}` },
+        502,
+      );
+    }
+    const agentData = await agentRes.json();
+    const agents: { slug: string; name: string }[] = agentData.agents ?? [];
+    const validSlugs = new Set(agents.map((a) => a.slug));
+
+    // Get all users from public-app
+    const db = getDb();
+    const users = db
+      .query<{
+        id: string;
+        email: string;
+        agent_slug: string;
+      }>("SELECT id, email, agent_slug FROM users")
+      .all();
+
+    let autoFixed = 0;
+    const manual: { userId: string; email: string; oldSlug: string }[] = [];
+
+    for (const user of users) {
+      if (validSlugs.has(user.agent_slug)) continue; // already valid
+
+      // Try auto-fix: substring match (e.g., "wati" → "eniwati")
+      const match = agents.find(
+        (a) =>
+          a.slug.includes(user.agent_slug) || user.agent_slug.includes(a.slug),
+      );
+
+      if (match) {
+        db.run("UPDATE users SET agent_slug=? WHERE id=?", [
+          match.slug,
+          user.id,
+        ]);
+        autoFixed++;
+      } else {
+        manual.push({
+          userId: user.id,
+          email: user.email,
+          oldSlug: user.agent_slug,
+        });
+      }
+    }
+
+    return c.json({
+      autoFixed,
+      needsManualFix: manual,
+      agents: agents.map((a) => ({ slug: a.slug, name: a.name })),
+      totalUsers: users.length,
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // ─── Chat (SSE stream) ───
 
 app.post("/api/chat", requireAuth, async (c) => {
   const user: any = c.get("user");
   const agentSlug = user.agentSlug;
-  const { message, isNewSession } = await c.req.json<{ message?: string; isNewSession?: boolean }>();
+  const { message } = await c.req.json<{ message?: string }>();
   if (!message) return c.json({ error: "Message is required" }, 400);
 
-  const finalMessage = isNewSession
-    ? "[SYSTEM: NEW SESSION — Semua percakapan sebelumnya DIHAPUS. Kamu adalah asisten berbahasa Indonesia. JANGAN gunakan bahasa Prancis, Inggris, atau bahasa lain. Mulai dari nol. Sapaan pertama: 'Halo! Ada yang bisa saya bantu?']\n\n" + message
-    : message;
+  const finalMessage = message;
 
   let totalInput = 0;
   let totalOutput = 0;
@@ -238,7 +301,7 @@ app.post("/api/chat", requireAuth, async (c) => {
         controller.enqueue(encoder.encode(`data: ${data}\n\n`));
 
       try {
-        for await (const event of sendChatMessage(agentSlug, finalMessage)) {
+        for await (const event of sendChatMessage(agentSlug, message)) {
           if (event.type === "text") {
             send(JSON.stringify({ type: "text", content: event.data }));
           } else if (event.type === "tool_call") {
@@ -356,39 +419,48 @@ app.get("/api/memory", requireAuth, (c) => {
 
 app.post("/api/session/new", requireAuth, async (c) => {
   const user: any = c.get("user");
-  const { title } = await c.req.json<{ title?: string }>() ?? {};
+  const { title } = (await c.req.json<{ title?: string }>()) ?? {};
   const db = getDb();
   const id = crypto.randomUUID();
   const now = Date.now();
   db.run(
     "INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at) VALUES (?,?,?,?,?)",
-    [id, user.id, title ?? null, now, now]
+    [id, user.id, title ?? null, now, now],
   );
-  return c.json({ session: { id, title: title ?? null, createdAt: now, updatedAt: now } }, 201);
+  return c.json(
+    { session: { id, title: title ?? null, createdAt: now, updatedAt: now } },
+    201,
+  );
 });
 
 app.get("/api/sessions", requireAuth, (c) => {
   const user: any = c.get("user");
   const db = getDb();
-  const rows = db.query<ChatSession, [string]>(
-    "SELECT id, user_id as userId, title, created_at as createdAt, updated_at as updatedAt FROM chat_sessions WHERE user_id=? ORDER BY created_at DESC"
-  ).all(user.id);
+  const rows = db
+    .query<
+      ChatSession,
+      [string]
+    >("SELECT id, user_id as userId, title, created_at as createdAt, updated_at as updatedAt FROM chat_sessions WHERE user_id=? ORDER BY created_at DESC")
+    .all(user.id);
   return c.json({ sessions: rows });
 });
 
 app.patch("/api/sessions/:id", requireAuth, async (c) => {
   const user: any = c.get("user");
   const id = c.req.param("id");
-  const { title } = await c.req.json<{ title?: string }>() ?? {};
+  const { title } = (await c.req.json<{ title?: string }>()) ?? {};
   const db = getDb();
   const now = Date.now();
   db.run(
     "UPDATE chat_sessions SET title=?, updated_at=? WHERE id=? AND user_id=?",
-    [title ?? null, now, id, user.id]
+    [title ?? null, now, id, user.id],
   );
-  const row = db.query<ChatSession, [string, string]>(
-    "SELECT id, user_id as userId, title, created_at as createdAt, updated_at as updatedAt FROM chat_sessions WHERE id=? AND user_id=?"
-  ).get(id, user.id);
+  const row = db
+    .query<
+      ChatSession,
+      [string, string]
+    >("SELECT id, user_id as userId, title, created_at as createdAt, updated_at as updatedAt FROM chat_sessions WHERE id=? AND user_id=?")
+    .get(id, user.id);
   return c.json({ session: row ?? null });
 });
 
@@ -439,11 +511,16 @@ app.patch("/api/admin/soul-requests/:id", adminAuth, async (c) => {
       if (soulUser) {
         await fetch(`${GEZYTECH_URL}/api/agents/${soulUser.agentSlug}`, {
           method: "PATCH",
-          headers: { "x-service-token": SERVICE_TOKEN, "Content-Type": "application/json" },
+          headers: {
+            "x-service-token": SERVICE_TOKEN,
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({ character: updated.soulText }),
         });
       }
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical */
+    }
     return c.json({ request: updated });
   }
   if (action === "reject") {
@@ -491,22 +568,32 @@ app.patch("/api/admin/tool-requests/:id", adminAuth, async (c) => {
     try {
       const toolUser = getUserById(updated.userId);
       if (toolUser) {
-        const agentRes = await fetch(`${GEZYTECH_URL}/api/agents/${toolUser.agentSlug}`, {
-          headers: { "x-service-token": SERVICE_TOKEN },
-        });
+        const agentRes = await fetch(
+          `${GEZYTECH_URL}/api/agents/${toolUser.agentSlug}`,
+          {
+            headers: { "x-service-token": SERVICE_TOKEN },
+          },
+        );
         if (agentRes.ok) {
           const agentData: any = await agentRes.json();
           const currentExtra: string[] = agentData.extraToolNames ?? [];
           if (!currentExtra.includes(updated.toolName)) {
             await fetch(`${GEZYTECH_URL}/api/agents/${toolUser.agentSlug}`, {
               method: "PATCH",
-              headers: { "x-service-token": SERVICE_TOKEN, "Content-Type": "application/json" },
-              body: JSON.stringify({ extraToolNames: [...currentExtra, updated.toolName] }),
+              headers: {
+                "x-service-token": SERVICE_TOKEN,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                extraToolNames: [...currentExtra, updated.toolName],
+              }),
             });
           }
         }
       }
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical */
+    }
     return c.json({ request: updated });
   }
   if (action === "reject") {
