@@ -11,6 +11,9 @@ const SERVICE_TOKEN = process.env.GEZYTECH_SERVICE_TOKEN ?? "dev-token-shared";
 const POLL_INTERVAL_MS = 1500;
 const MAX_POLL_TIME_MS = 120_000;
 
+// Track already-seen message IDs across calls so old responses are never replayed
+const globalSeenIds = new Map<string, Set<string>>();
+
 async function gezytechApi(path: string, options?: RequestInit) {
   const res = await fetch(`${GEZYTECH_URL}${path}`, {
     ...options,
@@ -93,7 +96,11 @@ export async function* sendChatMessage(
   data?: any;
 }> {
   // Track seen message IDs across both poll phases so we never replay old responses
-  const seenIds = new Set<string>();
+  let seenIds = globalSeenIds.get(agentSlug);
+  if (!seenIds) {
+    seenIds = new Set<string>();
+    globalSeenIds.set(agentSlug, seenIds);
+  }
 
   // If preInstruction is provided, send it first and wait for it to be processed
   if (preInstruction) {
