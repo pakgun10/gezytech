@@ -221,8 +221,12 @@ app.delete("/api/admin/users/:id", adminAuth, (c) => {
 app.post("/api/chat", requireAuth, async (c) => {
   const user: any = c.get("user");
   const agentSlug = user.agentSlug;
-  const { message } = await c.req.json<{ message?: string }>();
+  const { message, isNewSession } = await c.req.json<{ message?: string; isNewSession?: boolean }>();
   if (!message) return c.json({ error: "Message is required" }, 400);
+
+  const finalMessage = isNewSession
+    ? "[KONTEKS BARU — User memulai sesi percakapan baru. Abaikan semua percakapan sebelumnya. Mulai dari awal dengan sapaan hangat dalam Bahasa Indonesia.]\n\n" + message
+    : message;
 
   let totalInput = 0;
   let totalOutput = 0;
@@ -234,7 +238,7 @@ app.post("/api/chat", requireAuth, async (c) => {
         controller.enqueue(encoder.encode(`data: ${data}\n\n`));
 
       try {
-        for await (const event of sendChatMessage(agentSlug, message)) {
+        for await (const event of sendChatMessage(agentSlug, finalMessage)) {
           if (event.type === "text") {
             send(JSON.stringify({ type: "text", content: event.data }));
           } else if (event.type === "tool_call") {

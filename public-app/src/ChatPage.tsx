@@ -23,6 +23,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
   const [viewingHistory, setViewingHistory] = useState(false);
   const [allMessages, setAllMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionMessageCount, setSessionMessageCount] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Load chat history on mount
@@ -83,6 +84,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
     setSessionId(session.id);
     setViewingHistory(false);
     setLoadingHistory(false);
+    setSessionMessageCount(0);
   };
 
   const handleBackToLatest = () => {
@@ -110,6 +112,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
         setSessionId(data.session.id);
         setMessages([]);
         setViewingHistory(false);
+        setSessionMessageCount(0);
       }
     } catch {}
   };
@@ -132,12 +135,16 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
     setInput("");
     setStreaming(true);
     setStreamText("");
+    setSessionMessageCount((c) => c + 1);
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({
+          message: text,
+          isNewSession: sessionMessageCount === 0,
+        }),
       });
 
       if (!res.ok) throw new Error("Chat failed");
