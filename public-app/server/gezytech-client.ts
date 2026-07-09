@@ -27,13 +27,15 @@ async function gezytechApi(path: string, options?: RequestInit) {
   return res;
 }
 
-/** Send a message and poll for response from agent */
-async function* pollAgentResponse(agentSlug: string): AsyncGenerator<{
+/** Poll for agent response, skipping already-seen message IDs */
+async function* pollAgentResponse(
+  agentSlug: string,
+  seenIds: Set<string>,
+): AsyncGenerator<{
   type: "text" | "tool_call" | "token" | "done" | "error";
   data?: any;
 }> {
   const startTime = Date.now();
-  let seenIds = new Set<string>();
 
   while (Date.now() - startTime < MAX_POLL_TIME_MS) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
@@ -90,6 +92,9 @@ export async function* sendChatMessage(
   type: "text" | "tool_call" | "token" | "done" | "error";
   data?: any;
 }> {
+  // Track seen message IDs across both poll phases so we never replay old responses
+  const seenIds = new Set<string>();
+
   // If preInstruction is provided, send it first and wait for it to be processed
   if (preInstruction) {
     const preRes = await gezytechApi(`/api/agents/${agentSlug}/messages`, {
@@ -101,8 +106,8 @@ export async function* sendChatMessage(
       throw new Error("Failed to enqueue pre-instruction");
 
     // Wait for the agent to process the instruction (consume but don't yield)
-    for await (const _event of pollAgentResponse(agentSlug)) {
-      if (_.event?.type === "done" || _.event?.type === "error") break;
+    for await (const _event of pollAgentResponse(agentSlug, seenIds)) {
+      if (_event.type === "done" || _event.type === "error") break;
     }
     // Small delay to ensure agent state is settled
     await new Promise((r) => setTimeout(r, 500));
@@ -116,6 +121,6 @@ export async function* sendChatMessage(
   const enqueueData = await enqueueRes.json();
   if (!enqueueData.messageId) throw new Error("Failed to enqueue message");
 
-  // Step 2: Poll for agent response
-  yield* pollAgentResponse(agentSlug);
+  // Step 2: Poll for agent response (shares seenIds with preInstruction phase)
+  yield* pollAgentResponse(agentSlug, seenIds);
 }
