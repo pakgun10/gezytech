@@ -1,7 +1,7 @@
-import { getDb } from './db'
+import { getDb } from "./db";
 
 export function runMigrations(): void {
-  const db = getDb()
+  const db = getDb();
 
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
@@ -13,7 +13,7 @@ export function runMigrations(): void {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )
-  `)
+  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -23,7 +23,7 @@ export function runMigrations(): void {
       expires_at INTEGER NOT NULL,
       created_at INTEGER NOT NULL
     )
-  `)
+  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS tool_requests (
@@ -36,7 +36,7 @@ export function runMigrations(): void {
       created_at INTEGER NOT NULL,
       reviewed_at INTEGER
     )
-  `)
+  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS soul_requests (
@@ -48,7 +48,7 @@ export function runMigrations(): void {
       created_at INTEGER NOT NULL,
       reviewed_at INTEGER
     )
-  `)
+  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS token_usage (
@@ -59,5 +59,15 @@ export function runMigrations(): void {
       total_tokens INTEGER NOT NULL,
       created_at INTEGER NOT NULL
     )
-  `)
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
 }

@@ -22,6 +22,7 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
   const [sessionError, setSessionError] = useState(false);
   const [viewingHistory, setViewingHistory] = useState(false);
   const [allMessages, setAllMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Load chat history on mount
@@ -49,31 +50,85 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
       })
       .catch(() => {})
       .finally(() => setLoadingHistory(false));
+
+    // Fetch active session or create one
+    fetch("/api/sessions")
+      .then((r) => r.json())
+      .then((data) => {
+        const sessions = data.sessions ?? [];
+        if (sessions.length > 0) {
+          setSessionId(sessions[0].id);
+        } else {
+          // No sessions yet — create first one
+          fetch("/api/session/new", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "Chat 1" }),
+          })
+            .then((r) => r.json())
+            .then((d) => setSessionId(d.session?.id ?? null));
+        }
+      })
+      .catch(() => {});
   }, []);
 
-  // Called when user selects a conversation from HistoryPanel
-  const handleSelectHistory = (
-    msgs: Array<{
-      id: string;
-      role: string;
-      content: string;
-      timestamp: number;
-    }>,
-  ) => {
-    setMessages(
-      msgs.map((m) => ({
-        id: m.id,
-        role: (m.role === "user" ? "user" : "agent") as Message["role"],
-        content: m.content,
-        timestamp: m.timestamp,
-      })),
-    );
-    setViewingHistory(true);
+  // Called when user selects a session from HistoryPanel
+  const handleSelectHistory = (session: {
+    id: string;
+    title: string | null;
+    createdAt: number;
+  }) => {
+    // Filter messages from this session's time window
+    fetch("/api/sessions")
+      .then((r) => r.json())
+      .then((data) => {
+        const sessions = (data.sessions ?? []) as Array<{
+          id: string;
+          createdAt: number;
+        }>;
+        // Find next session after this one to get end boundary
+        const sorted = [...sessions].sort((a, b) => a.createdAt - b.createdAt);
+        const idx = sorted.findIndex((s) => s.id === session.id);
+        const endTime =
+          idx < sorted.length - 1 ? sorted[idx + 1].createdAt : Date.now();
+
+        const sessionMsgs = allMessages.filter(
+          (m) => m.timestamp >= session.createdAt && m.timestamp < endTime,
+        );
+        setMessages(sessionMsgs.length > 0 ? sessionMsgs : []);
+        setSessionId(session.id);
+        setViewingHistory(false);
+      })
+      .catch(() => {});
   };
 
   const handleBackToLatest = () => {
     setMessages(allMessages);
     setViewingHistory(false);
+    fetch("/api/sessions")
+      .then((r) => r.json())
+      .then((data) => {
+        const sessions = data.sessions ?? [];
+        if (sessions.length > 0) setSessionId(sessions[0].id);
+      })
+      .catch(() => {});
+  };
+
+  const handleNewSession = async () => {
+    try {
+      const n = (allMessages?.length || 0) + 1;
+      const res = await fetch("/api/session/new", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Chat " + n }),
+      });
+      const data = await res.json();
+      if (data.session) {
+        setSessionId(data.session.id);
+        setMessages([]);
+        setViewingHistory(false);
+      }
+    } catch {}
   };
 
   useEffect(() => {
@@ -264,7 +319,11 @@ export function ChatPage({ agentSlug }: { agentSlug: string }) {
             </button>
           )}
           <TokenBar />
-          <HistoryPanel onSelect={handleSelectHistory} />
+          <HistoryPanel
+            activeSessionId={sessionId ?? undefined}
+            onSelect={handleSelectHistory}
+            onNew={handleNewSession}
+          />
           <ToolRequestButton />
           <SoulRequestButton />
           <MemoryPanel />

@@ -13,7 +13,7 @@ import {
   createUser,
   listUsers,
 } from "./auth";
-import { getDb } from "./db";
+import { getDb, type ChatSession } from "./db";
 import { sendChatMessage } from "./gezytech-client";
 import {
   createSoulRequest,
@@ -346,6 +346,54 @@ app.get("/api/memory", requireAuth, (c) => {
     memories: [],
     note: "Memory will be proxied to gezytech after PUB-20",
   });
+});
+
+// ─── Chat Sessions ───
+
+app.post("/api/session/new", requireAuth, async (c) => {
+  const user: any = c.get("user");
+  const { title } = await c.req.json<{ title?: string }>() ?? {};
+  const db = getDb();
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  db.run(
+    "INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at) VALUES (?,?,?,?,?)",
+    [id, user.id, title ?? null, now, now]
+  );
+  return c.json({ session: { id, title: title ?? null, createdAt: now, updatedAt: now } }, 201);
+});
+
+app.get("/api/sessions", requireAuth, (c) => {
+  const user: any = c.get("user");
+  const db = getDb();
+  const rows = db.query<ChatSession, [string]>(
+    "SELECT id, user_id as userId, title, created_at as createdAt, updated_at as updatedAt FROM chat_sessions WHERE user_id=? ORDER BY created_at DESC"
+  ).all(user.id);
+  return c.json({ sessions: rows });
+});
+
+app.patch("/api/sessions/:id", requireAuth, async (c) => {
+  const user: any = c.get("user");
+  const id = c.req.param("id");
+  const { title } = await c.req.json<{ title?: string }>() ?? {};
+  const db = getDb();
+  const now = Date.now();
+  db.run(
+    "UPDATE chat_sessions SET title=?, updated_at=? WHERE id=? AND user_id=?",
+    [title ?? null, now, id, user.id]
+  );
+  const row = db.query<ChatSession, [string, string]>(
+    "SELECT id, user_id as userId, title, created_at as createdAt, updated_at as updatedAt FROM chat_sessions WHERE id=? AND user_id=?"
+  ).get(id, user.id);
+  return c.json({ session: row ?? null });
+});
+
+app.delete("/api/sessions/:id", requireAuth, (c) => {
+  const user: any = c.get("user");
+  const id = c.req.param("id");
+  const db = getDb();
+  db.run("DELETE FROM chat_sessions WHERE id=? AND user_id=?", [id, user.id]);
+  return c.json({ success: true });
 });
 
 // ─── SOUL Requests ───
