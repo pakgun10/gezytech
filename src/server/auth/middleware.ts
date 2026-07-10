@@ -52,8 +52,10 @@ export async function authMiddleware(c: Context, next: Next) {
   const serviceToken = c.req.header("x-service-token") ?? "";
   const expectedToken = process.env.GEZYTECH_SERVICE_TOKEN ?? "";
   if (serviceToken && expectedToken && serviceToken === expectedToken) {
-    c.set("user", { id: "service", name: "Service", email: "" } as never);
-    c.set("session", { id: "service", userId: "service", token: "service" } as never);
+    // Accept optional x-user-id to impersonate a specific user (trusted caller).
+    const userId = c.req.header("x-user-id") || "service";
+    c.set("user", { id: userId, name: "Service", email: "" } as never);
+    c.set("session", { id: "service", userId, token: "service" } as never);
     return next();
   }
 

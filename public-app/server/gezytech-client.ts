@@ -23,14 +23,20 @@ function getSeenIds(agentSlug: string): Set<string> {
   return ids;
 }
 
-async function gezytechApi(path: string, options?: RequestInit) {
+async function gezytechApi(
+  path: string,
+  options?: RequestInit & { userId?: string },
+) {
+  const headers: Record<string, string> = {
+    ...((options?.headers as Record<string, string>) ?? {}),
+    "x-service-token": SERVICE_TOKEN,
+    "Content-Type": "application/json",
+  };
+  if (options?.userId) headers["x-user-id"] = options.userId;
+  const { userId: _, ...rest } = options ?? {};
   const res = await fetch(`${GEZYTECH_URL}${path}`, {
-    ...options,
-    headers: {
-      ...options?.headers,
-      "x-service-token": SERVICE_TOKEN,
-      "Content-Type": "application/json",
-    },
+    ...rest,
+    headers,
   });
   if (!res.ok) {
     const text = await res.text();
@@ -44,6 +50,8 @@ async function* pollAgentResponse(
   agentSlug: string,
   seenIds: Set<string>,
   anchorTimeMs: number,
+  sessionId?: string,
+  userId?: string,
 ): AsyncGenerator<{
   type: "text" | "tool_call" | "token" | "done" | "error";
   data?: any;
@@ -54,8 +62,11 @@ async function* pollAgentResponse(
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
 
     try {
+      const params = new URLSearchParams({ limit: "10" });
+      if (sessionId) params.set("sessionId", sessionId);
       const pollRes = await gezytechApi(
-        `/api/agents/${agentSlug}/messages?limit=10`,
+        `/api/agents/${agentSlug}/messages?${params}`,
+        { userId },
       );
       const pollData = await pollRes.json();
       const newMessages: any[] = pollData.messages ?? [];
@@ -107,6 +118,7 @@ export async function* sendChatMessage(
   message: string,
   preInstruction?: string,
   sessionId?: string,
+  userId?: string,
 ): AsyncGenerator<{
   type: "text" | "tool_call" | "token" | "done" | "error";
   data?: any;
@@ -118,6 +130,7 @@ export async function* sendChatMessage(
     const preRes = await gezytechApi(`/api/agents/${agentSlug}/messages`, {
       method: "POST",
       body: JSON.stringify({ content: preInstruction }),
+      userId,
     });
     const preData = await preRes.json();
     if (!preData.messageId)
@@ -129,6 +142,8 @@ export async function* sendChatMessage(
       agentSlug,
       seenIds,
       preAnchor,
+      sessionId,
+      userId,
     )) {
       if (_event.type === "done" || _event.type === "error") break;
     }
@@ -145,10 +160,11 @@ export async function* sendChatMessage(
   const enqueueRes = await gezytechApi(`/api/agents/${agentSlug}/messages`, {
     method: "POST",
     body: JSON.stringify(enqueueBody),
+    userId,
   });
   const enqueueData = await enqueueRes.json();
   if (!enqueueData.messageId) throw new Error("Failed to enqueue message");
 
   // Poll for agent response — only accept messages created AFTER anchorTimeMs
-  yield* pollAgentResponse(agentSlug, seenIds, anchorTimeMs);
+  yield* pollAgentResponse(agentSlug, seenIds, anchorTimeMs, sessionId, userId);
 }

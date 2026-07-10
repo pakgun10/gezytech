@@ -29,6 +29,7 @@ export function ChatPage({
   const [viewingHistory, setViewingHistory] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionMessageCount, setSessionMessageCount] = useState(0);
+  const titledSessions = useRef<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadHistory = useCallback((sid: string | null) => {
@@ -123,11 +124,10 @@ export function ChatPage({
 
   const handleNewSession = async () => {
     try {
-      const n = (messages?.length || 0) + 1;
       const res = await fetch("/api/session/new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Chat " + n }),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (data.error) {
@@ -163,6 +163,21 @@ export function ChatPage({
     setStreaming(true);
     setStreamText("");
     setSessionMessageCount((c) => c + 1);
+
+    // Auto-title: gunakan chat pertama sebagai judul session (maks 50 karakter)
+    if (
+      sessionId &&
+      !titledSessions.current.has(sessionId) &&
+      sessionMessageCount === 0
+    ) {
+      titledSessions.current.add(sessionId);
+      const autoTitle = text.length > 50 ? text.slice(0, 47) + "..." : text;
+      fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: autoTitle }),
+      }).catch(() => {});
+    }
 
     try {
       const res = await fetch("/api/chat", {

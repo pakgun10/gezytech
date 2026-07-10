@@ -142,7 +142,11 @@ export function HistoryPanel({
                     fontWeight: s.id === activeSessionId ? 600 : 400,
                   }}
                 >
-                  {s.title || "Untitled chat"}
+                  {s.title
+                    ? s.title.length > 50
+                      ? s.title.slice(0, 47) + "..."
+                      : s.title
+                    : "New chat"}
                 </div>
                 <div style={{ fontSize: 11, color: "#999" }}>
                   {formatTime(s.createdAt)}

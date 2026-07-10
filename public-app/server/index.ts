@@ -304,7 +304,13 @@ app.post("/api/chat", requireAuth, async (c) => {
         controller.enqueue(encoder.encode(`data: ${data}\n\n`));
 
       try {
-        for await (const event of sendChatMessage(agentSlug, message, undefined, sessionId)) {
+        for await (const event of sendChatMessage(
+          agentSlug,
+          message,
+          undefined,
+          sessionId,
+          user.id,
+        )) {
           if (event.type === "text") {
             send(JSON.stringify({ type: "text", content: event.data }));
           } else if (event.type === "tool_call") {
@@ -440,17 +446,15 @@ app.post("/api/session/new", requireAuth, async (c) => {
   const { title } = (await c.req.json<{ title?: string }>()) ?? {};
 
   async function createSession() {
-    return fetch(
-      `${GEZYTECH_URL}/api/agents/${agentSlug}/quick-sessions`,
-      {
-        method: "POST",
-        headers: {
-          "x-service-token": SERVICE_TOKEN,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ title }),
+    return fetch(`${GEZYTECH_URL}/api/agents/${agentSlug}/quick-sessions`, {
+      method: "POST",
+      headers: {
+        "x-service-token": SERVICE_TOKEN,
+        "x-user-id": user.id,
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify({ title }),
+    });
   }
 
   try {
@@ -461,7 +465,9 @@ app.post("/api/session/new", requireAuth, async (c) => {
       try {
         const listRes = await fetch(
           `${GEZYTECH_URL}/api/agents/${agentSlug}/quick-sessions?status=active&limit=50`,
-          { headers: { "x-service-token": SERVICE_TOKEN } },
+          {
+            headers: { "x-service-token": SERVICE_TOKEN, "x-user-id": user.id },
+          },
         );
         if (listRes.ok) {
           const listData = await listRes.json();
@@ -470,14 +476,17 @@ app.post("/api/session/new", requireAuth, async (c) => {
           sessions.sort((a: any, b: any) => a.createdAt - b.createdAt);
           const oldest = sessions[0];
           if (oldest) {
-            await fetch(`${GEZYTECH_URL}/api/quick-sessions/${oldest.id}/close`, {
-              method: "POST",
-              headers: {
-                "x-service-token": SERVICE_TOKEN,
-                "Content-Type": "application/json",
+            await fetch(
+              `${GEZYTECH_URL}/api/quick-sessions/${oldest.id}/close`,
+              {
+                method: "POST",
+                headers: {
+                  "x-service-token": SERVICE_TOKEN,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({}),
               },
-              body: JSON.stringify({}),
-            });
+            );
             res = await createSession();
           }
         }
@@ -488,7 +497,10 @@ app.post("/api/session/new", requireAuth, async (c) => {
 
     if (!res.ok) {
       const text = await res.text();
-      return c.json({ error: `Failed to create session: ${text.slice(0, 200)}` }, res.status as any);
+      return c.json(
+        { error: `Failed to create session: ${text.slice(0, 200)}` },
+        res.status as any,
+      );
     }
     const data = await res.json();
     return c.json(
@@ -515,12 +527,15 @@ app.get("/api/sessions", requireAuth, async (c) => {
     const res = await fetch(
       `${GEZYTECH_URL}/api/agents/${agentSlug}/quick-sessions?status=all&limit=50`,
       {
-        headers: { "x-service-token": SERVICE_TOKEN },
+        headers: { "x-service-token": SERVICE_TOKEN, "x-user-id": user.id },
       },
     );
     if (!res.ok) {
       const text = await res.text();
-      return c.json({ error: `Failed to fetch sessions: ${text.slice(0, 200)}` }, 502);
+      return c.json(
+        { error: `Failed to fetch sessions: ${text.slice(0, 200)}` },
+        502,
+      );
     }
     const data = await res.json();
     const sessions = (data.sessions ?? []).map((s: any) => ({
@@ -545,13 +560,17 @@ app.patch("/api/sessions/:id", requireAuth, async (c) => {
       method: "PATCH",
       headers: {
         "x-service-token": SERVICE_TOKEN,
+        "x-user-id": user.id,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ title }),
     });
     if (!res.ok) {
       const text = await res.text();
-      return c.json({ error: `Failed to update session: ${text.slice(0, 200)}` }, res.status as any);
+      return c.json(
+        { error: `Failed to update session: ${text.slice(0, 200)}` },
+        res.status as any,
+      );
     }
     const data = await res.json();
     return c.json({
@@ -578,7 +597,10 @@ app.delete("/api/sessions/:id", requireAuth, async (c) => {
     });
     if (!res.ok) {
       const text = await res.text();
-      return c.json({ error: `Failed to delete session: ${text.slice(0, 200)}` }, res.status as any);
+      return c.json(
+        { error: `Failed to delete session: ${text.slice(0, 200)}` },
+        res.status as any,
+      );
     }
     return c.json({ success: true });
   } catch (err: any) {

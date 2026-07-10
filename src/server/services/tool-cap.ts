@@ -25,13 +25,13 @@
  * Hivekeep picks it up automatically.
  */
 
-import type { LLMModel } from '@gezy/sdk'
-import { getLLMProvider } from '@/server/llm/llm/registry'
+import type { LLMModel } from "@gezy/sdk";
+import { getLLMProvider } from "@/server/llm/llm/registry";
 
 /** OpenAI-compatible conservative limit — matches every major
  *  provider's documented cap when one exists. Used when the provider
  *  type is unknown or declined to declare its own limit. */
-export const DEFAULT_MAX_LLM_TOOLS = 128
+export const DEFAULT_MAX_LLM_TOOLS = Number(process.env.GEZY_MAX_TOOLS) || 128;
 
 /**
  * Effective tool cap for a `(providerType, model)` pair. Model-level
@@ -41,12 +41,15 @@ export const DEFAULT_MAX_LLM_TOOLS = 128
  */
 export function getMaxToolsForRequest(
   providerType: string | null,
-  model?: Pick<LLMModel, 'maxTools'> | null,
+  model?: Pick<LLMModel, "maxTools"> | null,
 ): number {
-  if (model?.maxTools != null) return model.maxTools
-  if (!providerType) return DEFAULT_MAX_LLM_TOOLS
-  const provider = getLLMProvider(providerType)
-  return provider?.defaultMaxTools ?? DEFAULT_MAX_LLM_TOOLS
+  if (model?.maxTools != null) return model.maxTools;
+  if (!providerType) return DEFAULT_MAX_LLM_TOOLS;
+  const provider = getLLMProvider(providerType);
+  const providerDefault = provider?.defaultMaxTools;
+  // Env var GEZY_MAX_TOOLS can override both fallback and provider defaults
+  if (process.env.GEZY_MAX_TOOLS) return DEFAULT_MAX_LLM_TOOLS;
+  return providerDefault ?? DEFAULT_MAX_LLM_TOOLS;
 }
 
 /**
@@ -55,5 +58,5 @@ export function getMaxToolsForRequest(
  * Prefer the model-aware version when you can.
  */
 export function getMaxToolsForProvider(providerType: string | null): number {
-  return getMaxToolsForRequest(providerType, null)
+  return getMaxToolsForRequest(providerType, null);
 }
