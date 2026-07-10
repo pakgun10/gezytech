@@ -120,7 +120,7 @@ app.post("/disconnect", async (c) => {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getPublicUrl(): string {
-  return process.env.PUBLIC_URL ?? "http://localhost:5173";
+  return process.env.PLATFORM_URL ?? "http://localhost:5174";
 }
 
 export { app as googleDriveConnectionRoutes };

@@ -6,6 +6,10 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
+      "/api/connections/google-drive": {
+        target: "http://localhost:3002",
+        changeOrigin: true,
+      },
       "/api": {
         target: "http://localhost:3004",
         changeOrigin: true,
