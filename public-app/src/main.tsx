@@ -103,6 +103,23 @@ function App() {
           >
             {user.displayName} · {user.agentSlug}
           </span>
+          <a
+            href="http://localhost:5174/"
+            title="GezyTech Platform"
+            style={{
+              padding: "4px 10px",
+              background: "#f0fdf4",
+              color: "#16a34a",
+              border: "1px solid #bbf7d0",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 12,
+              textDecoration: "none",
+              fontWeight: 500,
+            }}
+          >
+            ⚙️ Platform
+          </a>
           <button
             className="top-bar-btn"
             onClick={logout}

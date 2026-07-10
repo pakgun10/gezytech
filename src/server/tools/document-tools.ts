@@ -1,13 +1,16 @@
-import { z } from 'zod'
-import { tool } from '@/server/tools/tool-helper'
-import { createLogger } from '@/server/logger'
-import { createFileFromContent } from '@/server/services/file-storage'
-import { markdownToPdf } from '@/server/services/document-render'
-import { markdownToDocxBuffer } from '@/server/services/document-render-docx'
-import { playwrightManager } from '@/server/services/playwright-manager'
-import type { ToolRegistration } from '@/server/tools/types'
+import { z } from "zod";
+import { tool } from "@/server/tools/tool-helper";
+import { createLogger } from "@/server/logger";
+import { createFileFromContent } from "@/server/services/file-storage";
+import { markdownToPdf } from "@/server/services/document-render";
+import { markdownToDocxBuffer } from "@/server/services/document-render-docx";
+import { playwrightManager } from "@/server/services/playwright-manager";
+import { resolveToolWorkspace } from "@/server/tools/workspace";
+import { resolve } from "path";
+import { readFile } from "fs/promises";
+import type { ToolRegistration } from "@/server/tools/types";
 
-const log = createLogger('tools:document')
+const log = createLogger("tools:document");
 
 /**
  * generate_pdf — render markdown (with LaTeX math via `$…$` / `$$…$$` /
@@ -22,118 +25,187 @@ const log = createLogger('tools:document')
  * the user to enable it).
  */
 export const generatePdfTool: ToolRegistration = {
-  availability: ['main'],
+  availability: ["main"],
   create: (ctx) =>
     tool({
       description:
-        'Render markdown content (headings, lists, tables, code blocks, and LaTeX math with $...$ / $$...$$ / ```math``` fences) into a PDF document and get a shareable URL. Use this for substantial written deliverables (reports, study notes, physics/math solutions) instead of dumping long content in a chat message. Always share the URL with the user afterwards.',
+        "Render markdown content (headings, lists, tables, code blocks, and LaTeX math with $...$ / $$...$$ / ```math``` fences) into a PDF document and get a shareable URL. Use this for substantial written deliverables (reports, study notes, physics/math solutions) instead of dumping long content in a chat message. Always share the URL with the user afterwards.",
       inputSchema: z.object({
         content: z
           .string()
-          .describe('Markdown source of the document. Supports GFM tables, task lists, fenced code, and LaTeX math.'),
+          .describe(
+            "Markdown source of the document. Supports GFM tables, task lists, fenced code, and LaTeX math.",
+          ),
         title: z
           .string()
           .optional()
-          .describe('Document title (used for the browser tab / PDF metadata and as filename fallback).'),
+          .describe(
+            "Document title (used for the browser tab / PDF metadata and as filename fallback).",
+          ),
         filename: z
           .string()
           .optional()
-          .describe('Shareable file name (without extension). Defaults to the title or "document".'),
+          .describe(
+            'Shareable file name (without extension). Defaults to the title or "document".',
+          ),
         format: z
-          .enum(['A4', 'Letter'])
+          .enum(["A4", "Letter"])
           .optional()
-          .describe('Page size. Default: A4.'),
+          .describe("Page size. Default: A4."),
         landscape: z
           .boolean()
           .optional()
-          .describe('Landscape orientation. Default: false (portrait).'),
+          .describe("Landscape orientation. Default: false (portrait)."),
       }),
       execute: async (args) => {
         if (!playwrightManager.isEnabled) {
           return {
             error:
-              'PDF generation unavailable — the headless browser is disabled. Ask the user to set WEB_BROWSING_HEADLESS_ENABLED=true and ensure Chromium is installed in the container.',
-          }
+              "PDF generation unavailable — the headless browser is disabled. Ask the user to set WEB_BROWSING_HEADLESS_ENABLED=true and ensure Chromium is installed in the container.",
+          };
         }
 
-        const content = args.content?.trim()
-        if (!content) return { error: 'content is required (markdown).' }
+        const content = args.content?.trim();
+        if (!content) return { error: "content is required (markdown)." };
 
         try {
           const { buffer } = await markdownToPdf(content, args.title, {
             format: args.format,
             landscape: args.landscape,
-          })
+          });
 
-          const baseName = (args.filename || args.title || 'document')
-            .trim()
-            .replace(/[^a-zA-Z0-9._-]+/g, '-')
-            .replace(/^-+|-+$/g, '')
-            .slice(0, 80) || 'document'
+          const baseName =
+            (args.filename || args.title || "document")
+              .trim()
+              .replace(/[^a-zA-Z0-9._-]+/g, "-")
+              .replace(/^-+|-+$/g, "")
+              .slice(0, 80) || "document";
 
-          const stored = await createFileFromContent(ctx.agentId, baseName, buffer.toString('base64'), 'application/pdf', {
-            isBase64: true,
-            createdByAgentId: ctx.agentId,
-            description: args.title,
-          })
+          const stored = await createFileFromContent(
+            ctx.agentId,
+            baseName,
+            buffer.toString("base64"),
+            "application/pdf",
+            {
+              isBase64: true,
+              createdByAgentId: ctx.agentId,
+              description: args.title,
+            },
+          );
 
-          log.info({ agentId: ctx.agentId, size: buffer.length }, 'PDF generated + stored')
-          return stored
+          log.info(
+            { agentId: ctx.agentId, size: buffer.length },
+            "PDF generated + stored",
+          );
+          return stored;
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'Failed to generate PDF'
-          log.error({ error: err, agentId: ctx.agentId }, 'generate_pdf failed')
-          return { error: message }
+          const message =
+            err instanceof Error ? err.message : "Failed to generate PDF";
+          log.error(
+            { error: err, agentId: ctx.agentId },
+            "generate_pdf failed",
+          );
+          return { error: message };
         }
       },
     }),
-}
+};
 
 export const generateDocxTool: ToolRegistration = {
-  availability: ['main'],
+  availability: ["main"],
   create: (ctx) =>
     tool({
       description:
-        'Render markdown content (headings, lists, tables, code blocks, and LaTeX math with $...$ / $$...$$ / ```math``` fences) into a Word (.docx) document with native editable equations, and get a shareable URL. Use this for substantial written deliverables (reports, study notes, RPP, physics/math solutions) instead of dumping long content in a chat message. Always share the URL with the user afterwards.',
+        "Render markdown content (headings, lists, tables, code blocks, and LaTeX math with $...$ / $$...$$ / ```math``` fences) into a Word (.docx) document with native editable equations, and get a shareable URL. Use this for substantial written deliverables (reports, study notes, RPP, physics/math solutions) instead of dumping long content in a chat message. Always share the URL with the user afterwards.\n\n" +
+        'For VERY long documents that exceed the chat output limit: first write the full markdown to the workspace with write_file(), then call this tool with source="workspace" and the file path.',
       inputSchema: z.object({
+        source: z
+          .enum(["content", "workspace"])
+          .default("content")
+          .describe(
+            "'content' for inline markdown, 'workspace' to read from a workspace file (use for very long documents).",
+          ),
         content: z
           .string()
-          .describe('Markdown source of the document. Supports GFM tables, task lists, fenced code, and LaTeX math.'),
+          .optional()
+          .describe(
+            'Markdown source of the document. Required when source="content".',
+          ),
+        path: z
+          .string()
+          .optional()
+          .describe('Workspace file path. Required when source="workspace".'),
         title: z
           .string()
           .optional()
-          .describe('Document title (used for metadata and as filename fallback).'),
+          .describe(
+            "Document title (used for metadata and as filename fallback).",
+          ),
         filename: z
           .string()
           .optional()
-          .describe('Shareable file name (without extension). Defaults to the title or "document".'),
+          .describe(
+            'Shareable file name (without extension). Defaults to the title or "document".',
+          ),
       }),
       execute: async (args) => {
-        const content = args.content?.trim()
-        if (!content) return { error: 'content is required (markdown).' }
+        let content: string;
+
+        if (args.source === "workspace") {
+          if (!args.path)
+            return { error: 'path is required when source="workspace".' };
+          const workspace = resolveToolWorkspace(ctx as any);
+          const absPath = resolve(workspace, args.path);
+          if (!absPath.startsWith(workspace))
+            return { error: "Path must be within the workspace." };
+          try {
+            content = await readFile(absPath, "utf-8");
+          } catch {
+            return { error: `File not found: ${args.path}` };
+          }
+        } else {
+          content = args.content ?? "";
+        }
+
+        if (!content.trim())
+          return { error: "content is required (markdown)." };
 
         try {
-          const buffer = await markdownToDocxBuffer(content, args.title)
+          const buffer = await markdownToDocxBuffer(content, args.title);
 
-          const baseName = (args.filename || args.title || 'document')
-            .trim()
-            .replace(/[^a-zA-Z0-9._-]+/g, '-')
-            .replace(/^-+|-+$/g, '')
-            .slice(0, 80) || 'document'
+          const baseName =
+            (args.filename || args.title || "document")
+              .trim()
+              .replace(/[^a-zA-Z0-9._-]+/g, "-")
+              .replace(/^-+|-+$/g, "")
+              .slice(0, 80) || "document";
 
-          const stored = await createFileFromContent(ctx.agentId, baseName, buffer.toString('base64'), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', {
-            isBase64: true,
-            createdByAgentId: ctx.agentId,
-            description: args.title,
-          })
+          const stored = await createFileFromContent(
+            ctx.agentId,
+            baseName,
+            buffer.toString("base64"),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            {
+              isBase64: true,
+              createdByAgentId: ctx.agentId,
+              description: args.title,
+            },
+          );
 
-          log.info({ agentId: ctx.agentId, size: buffer.length }, 'DOCX generated + stored')
-          return stored
+          log.info(
+            { agentId: ctx.agentId, size: buffer.length },
+            "DOCX generated + stored",
+          );
+          return stored;
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'Failed to generate document'
-          log.error({ error: err, agentId: ctx.agentId }, 'generate_docx failed')
-          return { error: message }
+          const message =
+            err instanceof Error ? err.message : "Failed to generate document";
+          log.error(
+            { error: err, agentId: ctx.agentId },
+            "generate_docx failed",
+          );
+          return { error: message };
         }
       },
     }),
-}
-
+};

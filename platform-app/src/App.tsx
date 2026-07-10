@@ -10,7 +10,9 @@ const fmtMoney = (n: number) => "Rp " + n.toLocaleString("id-ID");
 
 export function App() {
   const { user, loading, logout } = useAuth();
-  const [page, setPage] = useState<"dashboard" | "usage" | "topup" | "billing" | "profile">("dashboard");
+  const [page, setPage] = useState<
+    "dashboard" | "usage" | "topup" | "billing" | "profile"
+  >("dashboard");
 
   if (loading) {
     return <div className="loading">Loading...</div>;
@@ -22,7 +24,10 @@ export function App() {
         <div className="login-card">
           <h1>GezyTech Platform</h1>
           <p>Login dengan akun GezyTech untuk mengakses dashboard.</p>
-          <button className="btn btn-primary" onClick={() => (window.location.href = "/api/auth/login")}>
+          <button
+            className="btn btn-primary"
+            onClick={() => (window.location.href = "/api/auth/login")}
+          >
             Login dengan GezyTech
           </button>
         </div>
@@ -66,8 +71,32 @@ export function App() {
           {navItem("billing", "Billing")}
           {navItem("profile", "Profil")}
         </nav>
+        <div
+          style={{
+            padding: "8px 12px",
+            borderTop: "1px solid #e5e5e5",
+            borderBottom: "1px solid #e5e5e5",
+          }}
+        >
+          <a
+            href="http://localhost:5173/"
+            style={{
+              display: "block",
+              padding: "8px 12px",
+              fontSize: 13,
+              color: "#2563eb",
+              textDecoration: "none",
+              borderRadius: 6,
+              fontWeight: 500,
+            }}
+          >
+            💬 GezyTech Chat
+          </a>
+        </div>
         <div className="sidebar-footer">
-          <div><strong>{user.displayName}</strong></div>
+          <div>
+            <strong>{user.displayName}</strong>
+          </div>
           <div>{user.email}</div>
           <div style={{ marginTop: 4 }}>Saldo: {fmtMoney(user.balance)}</div>
           <button
