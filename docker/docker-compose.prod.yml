@@ -7,7 +7,7 @@
 services:
   gezy:
     # build langsung dari repo GitHub branch rename/gezy
-    image: ghcr.io/gunanto/gezybot:latest
+    image: ghcr.io/pakgun10/gezytech:latest
     # build:
     container_name: gezy
     ports:
