@@ -39,7 +39,19 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Deploy to VPS
+      - name: Copy dist to VPS
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "dist/*"
+          target: "/home/pgun/gezytech/dist"
+          strip_components: 0
+          overwrite: true
+
+      - name: Deploy on VPS
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -63,33 +75,15 @@ jobs:
             echo "Running database migrations..."
             bun run db:migrate
 
+            echo "Ensuring PM2 processes are running..."
+            pm2 describe gezytech >/dev/null 2>&1 || pm2 start start-pm2.sh --name gezytech --interpreter none --cwd /home/pgun/gezytech
+            pm2 describe public-app >/dev/null 2>&1 || pm2 start /home/pgun/gezytech/public-app/start-pm2.sh --name public-app --interpreter none --cwd /home/pgun/gezytech/public-app
+            pm2 describe platform-app >/dev/null 2>&1 || pm2 start /home/pgun/gezytech/platform-app/start-pm2.sh --name platform-app --interpreter none --cwd /home/pgun/gezytech/platform-app
+
             echo "Restarting services..."
             pm2 restart gezytech
             pm2 restart public-app
             pm2 restart platform-app
+            pm2 save
 
             echo "Deployment complete."
-
-      - name: Copy dist to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
-          source: "dist/*"
-          target: "/home/pgun/gezytech/dist"
-          strip_components: 0
-          overwrite: true
-
-      - name: Restart after dist copy
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
-          script: |
-            export PATH="$HOME/.bun/bin:$HOME/.npm-global/bin:/usr/bin:$PATH"
-            pm2 restart gezytech
-            echo "Restart complete."
