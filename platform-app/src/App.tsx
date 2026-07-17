@@ -81,7 +81,7 @@ export function App() {
           }}
         >
           <a
-            href="http://localhost:5175/"
+            href="https://chat.gezytech.web.id/"
             style={{
               display: "block",
               padding: "8px 12px",
