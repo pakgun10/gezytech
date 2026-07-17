@@ -4,8 +4,31 @@
 // Note: compilePage and generateBlock make real LLM calls (fetch to OpenAI).
 // Those are tested via integration tests. Here we test the pure planning logic.
 
-import { describe, it, expect } from 'bun:test'
-import type { Chapter, Page, BlockType } from '@gezy/sdk'
+import { describe, it, expect } from "bun:test";
+
+// ── Minimal local types (self-contained, no @gezy/sdk dependency) ─────────
+
+type BlockType =
+  | "text"
+  | "quiz"
+  | "callout"
+  | "code"
+  | "figure"
+  | "section"
+  | "concept_map"
+  | "flash_cards"
+  | "deep_dive";
+
+interface Chapter {
+  id: string;
+  title: string;
+  order: number;
+  learningObjectives: string[];
+  contentTypes: string[];
+  pageIds: string[];
+}
+
+// ── Function under test ────────────────────────────────────────────────────
 
 /**
  * Replicated from compiler.ts — planBlocks decides which block types
@@ -13,109 +36,123 @@ import type { Chapter, Page, BlockType } from '@gezy/sdk'
  * validates the same logic without importing the (server-only) module.
  */
 function planBlocks(chapter: Chapter): BlockType[] {
-  const types: BlockType[] = ['text']
+  const types: BlockType[] = ["text"];
 
   // Add callout after text
-  types.push('callout')
+  types.push("callout");
 
   // Add quiz if chapter includes assessment
-  if (chapter.contentTypes.includes('quiz')) {
-    types.push('quiz')
+  if (chapter.contentTypes.includes("quiz")) {
+    types.push("quiz");
   }
 
-  return types
+  return types;
 }
+
+// ── Helpers ────────────────────────────────────────────────────────────────
 
 function makeChapter(overrides: Partial<Chapter> = {}): Chapter {
   return {
-    id: 'ch-1',
-    title: 'Test Chapter',
+    id: "ch-1",
+    title: "Test Chapter",
     order: 0,
-    learningObjectives: ['Learn something'],
-    contentTypes: ['text'],
+    learningObjectives: ["Learn something"],
+    contentTypes: ["text"],
     pageIds: [],
     ...overrides,
-  }
+  };
 }
 
-describe('planBlocks', () => {
-  it('always includes a text block', () => {
-    const result = planBlocks(makeChapter())
-    expect(result).toContain('text')
-  })
+// ── Tests ──────────────────────────────────────────────────────────────────
 
-  it('always includes a callout block', () => {
-    const result = planBlocks(makeChapter())
-    expect(result).toContain('callout')
-  })
+describe("planBlocks", () => {
+  it("always includes a text block", () => {
+    const result = planBlocks(makeChapter());
+    expect(result).toContain("text" as BlockType);
+  });
 
-  it('text block comes first', () => {
-    const result = planBlocks(makeChapter())
-    expect(result[0]).toBe('text')
-  })
+  it("always includes a callout block", () => {
+    const result = planBlocks(makeChapter());
+    expect(result).toContain("callout" as BlockType);
+  });
 
-  it('callout block comes second', () => {
-    const result = planBlocks(makeChapter())
-    expect(result[1]).toBe('callout')
-  })
+  it("text block comes first", () => {
+    const result = planBlocks(makeChapter());
+    expect(result[0]).toBe("text");
+  });
 
-  it('includes quiz block when chapter has quiz content type', () => {
-    const result = planBlocks(
-      makeChapter({ contentTypes: ['text', 'quiz'] }),
-    )
-    expect(result).toContain('quiz')
-    expect(result.length).toBe(3) // text + callout + quiz
-  })
+  it("callout block comes second", () => {
+    const result = planBlocks(makeChapter());
+    expect(result[1]).toBe("callout");
+  });
 
-  it('does NOT include quiz when chapter lacks quiz content type', () => {
-    const result = planBlocks(makeChapter({ contentTypes: ['text'] }))
-    expect(result).not.toContain('quiz')
-    expect(result.length).toBe(2) // text + callout only
-  })
+  it("includes quiz block when chapter has quiz content type", () => {
+    const result = planBlocks(makeChapter({ contentTypes: ["text", "quiz"] }));
+    expect(result).toContain("quiz" as BlockType);
+    expect(result.length).toBe(3); // text + callout + quiz
+  });
 
-  it('default blocks for chapter with only quiz type (no text in contentTypes)', () => {
-    const result = planBlocks(makeChapter({ contentTypes: ['quiz'] }))
+  it("does NOT include quiz when chapter lacks quiz content type", () => {
+    const result = planBlocks(makeChapter({ contentTypes: ["text"] }));
+    expect(result).not.toContain("quiz" as BlockType);
+    expect(result.length).toBe(2); // text + callout only
+  });
+
+  it("default blocks for chapter with only quiz type (no text in contentTypes)", () => {
+    const result = planBlocks(makeChapter({ contentTypes: ["quiz"] }));
     // text + callout always present, quiz added
-    expect(result).toEqual(['text', 'callout', 'quiz'])
-  })
+    expect(result).toEqual(["text", "callout", "quiz"]);
+  });
 
-  it('returns correct order: text → callout → quiz', () => {
-    const result = planBlocks(makeChapter({ contentTypes: ['text', 'quiz'] }))
-    expect(result).toEqual(['text', 'callout', 'quiz'])
-  })
+  it("returns correct order: text → callout → quiz", () => {
+    const result = planBlocks(makeChapter({ contentTypes: ["text", "quiz"] }));
+    expect(result).toEqual(["text", "callout", "quiz"]);
+  });
 
-  it('handles empty contentTypes array gracefully', () => {
+  it("handles empty contentTypes array gracefully", () => {
     // In Chapter interface, contentTypes is string[], but could be empty
-    const result = planBlocks(makeChapter({ contentTypes: [] }))
-    expect(result).toEqual(['text', 'callout'])
-    expect(result).not.toContain('quiz')
-  })
+    const result = planBlocks(makeChapter({ contentTypes: [] }));
+    expect(result).toEqual(["text", "callout"]);
+    expect(result).not.toContain("quiz" as BlockType);
+  });
 
-  it('planBlocks is deterministic — same input produces same output', () => {
-    const ch = makeChapter({ contentTypes: ['text', 'quiz'] })
-    expect(planBlocks(ch)).toEqual(planBlocks(ch))
-  })
-})
+  it("planBlocks is deterministic — same input produces same output", () => {
+    const ch = makeChapter({ contentTypes: ["text", "quiz"] });
+    expect(planBlocks(ch)).toEqual(planBlocks(ch));
+  });
+});
 
-describe('compiler assumptions (for documentation)', () => {
-  it('only text, callout, and quiz block types are currently generated', () => {
+describe("compiler assumptions (for documentation)", () => {
+  it("only text, callout, and quiz block types are currently generated", () => {
     // These are the only types with prompts in BLOCK_PROMPTS.
     // Types like 'code', 'figure', 'section', 'concept_map', 'flash_cards',
     // 'deep_dive' are defined in the type system but not yet generated.
-    const implementedBlockTypes: BlockType[] = ['text', 'quiz', 'callout']
+    const implementedBlockTypes: BlockType[] = ["text", "quiz", "callout"];
     const allBlockTypes: BlockType[] = [
-      'text', 'quiz', 'callout', 'code', 'figure',
-      'section', 'concept_map', 'flash_cards', 'deep_dive',
-    ]
+      "text",
+      "quiz",
+      "callout",
+      "code",
+      "figure",
+      "section",
+      "concept_map",
+      "flash_cards",
+      "deep_dive",
+    ];
 
     const unimplemented = allBlockTypes.filter(
       (t) => !implementedBlockTypes.includes(t),
-    )
+    );
 
     // This test documents what's NOT yet generated by the compiler.
     // When new block generators are added, update `implementedBlockTypes`.
     expect(unimplemented).toEqual([
-      'code', 'figure', 'section', 'concept_map', 'flash_cards', 'deep_dive',
-    ])
-  })
-})
+      "code",
+      "figure",
+      "section",
+      "concept_map",
+      "flash_cards",
+      "deep_dive",
+    ]);
+  });
+});

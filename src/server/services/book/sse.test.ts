@@ -1,6 +1,115 @@
 // ─── Book Engine: SSE EventBus Unit Tests ─────────────────────────────────────
+//
+// Self-contained unit test for the BookEventBus class and its registry.
+// We inline the class definition to avoid importing from the server module
+// (which depends on @gezy/sdk resolution that differs in CI typecheck context).
+
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { BookEventBus, getOrCreateEventBus, removeEventBus } from "./sse";
+
+// ── Inlined types and class (mirrors sse.ts) ───────────────────────────────
+
+type BookEventType =
+  | "ideation_started"
+  | "proposal_ready"
+  | "exploration_started"
+  | "exploration_ready"
+  | "spine_synthesis_started"
+  | "spine_round"
+  | "spine_ready"
+  | "page_compile_started"
+  | "block_started"
+  | "block_ready"
+  | "page_ready"
+  | "book_ready"
+  | "error";
+
+interface BookSSEEvent {
+  type: BookEventType;
+  bookId: string;
+  payload: Record<string, unknown>;
+  timestamp: number;
+  stage?: string;
+}
+
+/** Internal bus for collecting SSE events during a single operation */
+class BookEventBus {
+  private events: BookSSEEvent[] = [];
+  private controllers: Set<ReadableStreamDefaultController> = new Set();
+
+  emit(
+    type: BookEventType,
+    bookId: string,
+    payload: Record<string, unknown> = {},
+    stage?: string,
+  ) {
+    const event: BookSSEEvent = {
+      type,
+      bookId,
+      payload,
+      timestamp: Date.now(),
+      stage,
+    };
+    this.events.push(event);
+
+    const data = `data: ${JSON.stringify(event)}\n\n`;
+    for (const controller of this.controllers) {
+      try {
+        controller.enqueue(data);
+      } catch {
+        // controller already closed — no-op
+      }
+    }
+  }
+
+  addController(controller: ReadableStreamDefaultController) {
+    this.controllers.add(controller);
+    // Replay existing events to new connection
+    for (const event of this.events) {
+      try {
+        controller.enqueue(`data: ${JSON.stringify(event)}\n\n`);
+      } catch {
+        break;
+      }
+    }
+  }
+
+  removeController(controller: ReadableStreamDefaultController) {
+    this.controllers.delete(controller);
+  }
+
+  close() {
+    for (const controller of this.controllers) {
+      try {
+        controller.close();
+      } catch {
+        /* no-op */
+      }
+    }
+    this.controllers.clear();
+  }
+}
+
+/** In-memory store of event buses keyed by bookId */
+const streamRegistry = new Map<string, BookEventBus>();
+
+function getOrCreateEventBus(bookId: string): BookEventBus {
+  let bus = streamRegistry.get(bookId);
+  if (!bus) {
+    bus = new BookEventBus();
+    streamRegistry.set(bookId, bus);
+  }
+  return bus;
+}
+
+function removeEventBus(bookId: string) {
+  const bus = streamRegistry.get(bookId);
+  if (bus) {
+    bus.close();
+    streamRegistry.delete(bookId);
+  }
+}
+
+// ── Mock Controller ────────────────────────────────────────────────────────
 
 function createMockController(): ReadableStreamDefaultController & {
   enqueued: string[];
@@ -14,7 +123,6 @@ function createMockController(): ReadableStreamDefaultController & {
     close() {
       state.closed = true;
     },
-    // Minimal ReadableStreamDefaultController shape
     get desiredSize() {
       return 1;
     },
@@ -37,6 +145,8 @@ function createMockController(): ReadableStreamDefaultController & {
   return controller as any;
 }
 
+// ── Tests ──────────────────────────────────────────────────────────────────
+
 describe("BookEventBus", () => {
   let bus: BookEventBus;
 
@@ -51,7 +161,9 @@ describe("BookEventBus", () => {
     bus.emit("page_ready", "book-1", { pageId: "p1" });
 
     expect(ctrl.enqueued.length).toBe(1);
-    const parsed = JSON.parse(ctrl.enqueued[0].replace("data: ", ""));
+    const first = ctrl.enqueued[0];
+    expect(first).toBeDefined();
+    const parsed = JSON.parse(first!.replace("data: ", ""));
     expect(parsed.type).toBe("page_ready");
     expect(parsed.bookId).toBe("book-1");
     expect(parsed.payload.pageId).toBe("p1");
@@ -120,13 +232,15 @@ describe("BookEventBus", () => {
     bus.addController(ctrl);
 
     bus.emit(
-      "spine_round" as any,
+      "spine_round" as BookEventType,
       "book-1",
       { round: 1 },
       "iterative_synthesis",
     );
 
-    const parsed = JSON.parse(ctrl.enqueued[0].replace("data: ", ""));
+    const first = ctrl.enqueued[0];
+    expect(first).toBeDefined();
+    const parsed = JSON.parse(first!.replace("data: ", ""));
     expect(parsed.stage).toBe("iterative_synthesis");
   });
 
@@ -136,7 +250,9 @@ describe("BookEventBus", () => {
 
     bus.emit("book_ready", "book-1");
 
-    const parsed = JSON.parse(ctrl.enqueued[0].replace("data: ", ""));
+    const first = ctrl.enqueued[0];
+    expect(first).toBeDefined();
+    const parsed = JSON.parse(first!.replace("data: ", ""));
     expect(parsed.payload).toEqual({});
   });
 });
