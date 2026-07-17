@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
+import { serveStatic } from "hono/bun";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { runMigrations } from "./migrate";
 import {
@@ -31,7 +32,7 @@ import {
 } from "./tool-request";
 
 // ─── Init ───
-const GEZYTECH_URL = process.env.GEZYTECH_API_URL ?? "http://localhost:3000";
+const GEZYTECH_URL = process.env.GEZYTECH_API_URL ?? "http://localhost:3002";
 const SERVICE_TOKEN = process.env.GEZYTECH_SERVICE_TOKEN ?? "dev-token-shared";
 runMigrations();
 if (process.env.DEV_MODE === "true") {
@@ -90,6 +91,8 @@ app.post("/api/auth/login", async (c) => {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
+    domain:
+      process.env.NODE_ENV === "production" ? ".gezytech.web.id" : undefined,
     path: "/",
     maxAge: 7 * 24 * 60 * 60,
   });
@@ -740,9 +743,15 @@ app.patch("/api/admin/tool-requests/:id", adminAuth, async (c) => {
   return c.json({ error: "Action must be 'approve' or 'reject'" }, 400);
 });
 
+// Serve static files in production
+if (process.env.NODE_ENV === "production") {
+  app.use("/*", serveStatic({ root: "./dist" }));
+  app.get("*", serveStatic({ path: "./dist/index.html" }));
+}
+
 // ─── Start ───
 
-const port = Number(process.env.PORT) || 3002;
+const port = Number(process.env.PORT) || 3003;
 console.log(`[gezytech-public] Server started on port ${port}`);
 
 serve({ fetch: app.fetch, port });
