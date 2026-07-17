@@ -1432,3 +1432,59 @@ export const projectKnowledge = sqliteTable('project_knowledge', {
   index('idx_project_knowledge_project').on(table.projectId),
   index('idx_project_knowledge_project_pinned').on(table.projectId, table.pinned),
 ])
+
+// ─── Book Engine tables ───────────────────────────────────────────────────────
+
+export const books = sqliteTable('books', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id),
+  title: text('title').notNull(),
+  description: text('description'),
+  status: text('status').notNull().default('draft'),
+  language: text('language').notNull().default('en'),
+  chapterCount: integer('chapter_count').notNull().default(0),
+  pageCount: integer('page_count').notNull().default(0),
+  knowledgeBaseIds: text('knowledge_base_ids'),
+  proposal: text('proposal'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
+export const bookSpines = sqliteTable('book_spines', {
+  id: text('id').primaryKey(),
+  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  conceptGraph: text('concept_graph').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
+export const bookChapters = sqliteTable('book_chapters', {
+  id: text('id').primaryKey(),
+  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  order: integer('order').notNull(),
+  learningObjectives: text('learning_objectives'),
+  contentTypes: text('content_types'),
+  pageIds: text('page_ids'),
+})
+
+export const bookPages = sqliteTable('book_pages', {
+  id: text('id').primaryKey(),
+  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  chapterId: text('chapter_id').notNull().references(() => bookChapters.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  order: integer('order').notNull(),
+  status: text('status').notNull().default('pending'),
+  blocks: text('blocks'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
+export const bookBlocks = sqliteTable('book_blocks', {
+  id: text('id').primaryKey(),
+  pageId: text('page_id').notNull().references(() => bookPages.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(),
+  order: integer('order').notNull(),
+  content: text('content').notNull(),
+  status: text('status').notNull().default('pending'),
+  sourceAnchors: text('source_anchors'),
+})

@@ -2734,3 +2734,7 @@ export interface PluginExports {
   activate?(): Promise<void>
   deactivate?(): Promise<void>
 }
+
+// ─── Book Engine ──────────────────────────────────────────────────────────
+export * from './book/types.js';
+export * from './book/schemas.js';
