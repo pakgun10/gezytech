@@ -104,7 +104,7 @@ function App() {
             {user.displayName} · {user.agentSlug}
           </span>
           <a
-            href="http://localhost:5174/"
+            href="https://platform.gezytech.web.id/"
             title="GezyTech Platform"
             style={{
               padding: "4px 10px",
