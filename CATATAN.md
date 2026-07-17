@@ -136,9 +136,19 @@ docker ps | grep gezy
 
 ## 👤 Akun
 
-### Chat:
+### Chat (chat.gezytech.web.id):
 - `dev@gezy.tech` / `devpass` (DEV_MODE)
 - `gunantotestee@gmail.com` / `MyloveEniku`
+
+### GezyTech Utama (aios.gezytech.web.id):
+- `gunantotestee@gmail.com` / `MyloveEniku`
+
+### Buat akun baru di GezyTech Utama (via API):
+```bash
+curl -X POST http://localhost:4178/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"email@contoh.com","password":"password123","name":"Nama"}'
+```
 
 ### Buat user baru:
 ```bash
