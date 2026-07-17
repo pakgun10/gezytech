@@ -22,7 +22,7 @@ export function useAuth() {
   }, []);
 
   const login = async () => {
-    window.location.href = "/api/auth/login";
+    window.location.href = "https://chat.gezytech.web.id/webchat/";
   };
 
   const logout = async () => {

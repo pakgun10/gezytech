@@ -26,7 +26,9 @@ export function App() {
           <p>Login dengan akun GezyTech untuk mengakses dashboard.</p>
           <button
             className="btn btn-primary"
-            onClick={() => (window.location.href = "/api/auth/login")}
+            onClick={() =>
+              (window.location.href = "https://chat.gezytech.web.id/webchat/")
+            }
           >
             Login dengan GezyTech
           </button>
@@ -79,7 +81,7 @@ export function App() {
           }}
         >
           <a
-            href="http://localhost:5173/"
+            href="http://localhost:5175/"
             style={{
               display: "block",
               padding: "8px 12px",
