@@ -17,6 +17,8 @@ jobs:
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
             set -e
+            export PATH="$HOME/.bun/bin:$HOME/.npm-global/bin:$PATH"
+
             cd /home/pgun/gezytech
 
             echo "Pulling latest code..."
