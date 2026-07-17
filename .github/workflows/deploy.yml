@@ -16,10 +16,24 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
-            cd /path/to/gezytech
+            set -e
+            cd /home/pgun/dev/gezy/gezytech
+
+            echo "Pulling latest code..."
             git pull origin master
+
+            echo "Installing dependencies..."
             bun install
+
+            echo "Running database migrations..."
             bun run db:migrate
+
+            echo "Building frontend..."
             bun run build
-            # restart service (sesuaikan dengan setup VPS Anda)
-            # pm2 restart gezytech || systemctl restart gezytech
+
+            echo "Restarting services..."
+            pm2 restart gezytech
+            pm2 restart public-app
+            pm2 restart platform-app
+
+            echo "Deployment complete."
