@@ -35,45 +35,51 @@ import {
 } from "@/server/services/book/export";
 import { bookProposalSchema, spineSchema } from "@gezy/sdk";
 import { config } from "@/server/config";
+import { pickAnyLLMModel } from "@/server/llm/core/resolve";
+import { runOneShot } from "@/server/llm/core/run-oneshot";
 
 const log = createLogger("routes:books");
 
-// Helper: simple LLM call wrapper using the project's OpenAI-compatible config
+/**
+ * LLM call wrapper that uses the project's provider connection system
+ * ("Manage your provider connections" in settings) instead of raw
+ * OPENAI_API_KEY env vars. Falls back to any available LLM provider.
+ */
 async function callLLM(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY || "";
-  const baseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.7,
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`LLM call failed: ${res.status} ${err}`);
+  const resolved = await pickAnyLLMModel();
+  if (!resolved) {
+    throw new Error(
+      "No LLM provider configured. Go to Settings → Provider Connections and add at least one LLM provider.",
+    );
   }
 
-  const data = (await res.json()) as {
-    choices?: { message: { content: string } }[];
-  };
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error("LLM call returned empty response");
-  return content;
+  // Pick a JSON-capable model: prefer gpt-4o-mini or any model the user has configured
+  const preferredModels = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"];
+  let targetResolved = resolved;
+  for (const modelId of preferredModels) {
+    try {
+      const { resolveLLM } = await import("@/server/llm/core/resolve");
+      targetResolved = await resolveLLM({
+        modelId,
+        providerId: resolved.providerRow.id,
+      });
+      break;
+    } catch {
+      // Try next model
+    }
+  }
+
+  const result = await runOneShot(targetResolved, {
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+  });
+
+  return result.text;
 }
 
 export const bookRoutes = new Hono<{ Variables: AppVariables }>();

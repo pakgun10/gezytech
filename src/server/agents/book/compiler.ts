@@ -3,6 +3,8 @@ import type { Chapter, Page, Block, BlockType, SourceChunk } from "@gezy/sdk";
 import { v7 as uuid } from "uuid";
 import { getOrCreateEventBus } from "@/server/services/book/sse";
 import { retrieveForBlock } from "@/server/services/book/rag";
+import { pickAnyLLMModel } from "@/server/llm/core/resolve";
+import { runOneShot } from "@/server/llm/core/run-oneshot";
 
 const BLOCK_PROMPTS: Record<string, string> = {
   text: `Write an educational text section for a book chapter.
@@ -133,8 +135,7 @@ export async function compilePage(
 }
 
 /**
- * Generate a single block using LLM + RAG.
- * In production, each block type would have its own dedicated generator.
+ * Generate a single block using LLM + RAG via the project's provider connection system.
  */
 async function generateBlock(
   type: BlockType,
@@ -171,37 +172,22 @@ async function generateBlock(
     .replace("{language}", language)
     .replace("{previousBlocks}", previousSummary);
 
-  // Simple LLM call
-  const apiKey = process.env.OPENAI_API_KEY || "";
-  const baseUrl = (
-    process.env.OPENAI_BASE_URL || "https://api.openai.com/v1"
-  ).replace(/\/$/, "");
-
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.7,
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`LLM call failed: ${res.status}`);
+  // Use the project's provider connection system
+  const resolved = await pickAnyLLMModel();
+  if (!resolved) {
+    throw new Error(
+      "No LLM provider configured. Go to Settings → Provider Connections to add one.",
+    );
   }
 
-  const data = (await res.json()) as {
-    choices?: { message: { content: string } }[];
-  };
-  const raw = data.choices?.[0]?.message?.content;
+  const result = await runOneShot(resolved, {
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+  });
+
+  const raw = result.text;
   if (!raw) throw new Error("LLM call returned empty response");
 
   let json = raw.trim();
