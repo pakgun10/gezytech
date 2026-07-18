@@ -4,7 +4,7 @@ FROM oven/bun:1.3 AS builder
 WORKDIR /app
 
 # Copy dependency files first for better layer caching
-COPY package.json bun.lockb ./
+COPY package.json ./
 COPY packages/sdk/package.json ./packages/sdk/
 COPY public-app/package.json ./public-app/
 COPY platform-app/package.json ./platform-app/
@@ -23,9 +23,7 @@ FROM oven/bun:1.3-slim
 WORKDIR /app
 
 # Copy built app
-COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/bun.lockb ./bun.lockb
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/public-app ./public-app
