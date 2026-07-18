@@ -138,8 +138,16 @@ bookRoutes.post("/", authMiddleware, async (c) => {
 
     return c.json({ bookId: book.id, proposal });
   } catch (err) {
-    bus.emit("error", book.id, { message: String(err) });
-    throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ err: message, bookId: book.id }, "Failed to generate proposal");
+    bus.emit("error", book.id, { message });
+
+    // Determine appropriate status code
+    const status = message.includes("LLM call failed") ? 502 : 500;
+    const code = message.includes("LLM call failed")
+      ? "LLM_ERROR"
+      : "PROPOSAL_FAILED";
+    return c.json({ error: { code, message } }, status as 500 | 502);
   }
 });
 
