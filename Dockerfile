@@ -34,6 +34,8 @@ COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/public-app ./public-app
 COPY --from=builder /app/platform-app ./platform-app
 COPY --from=builder /app/start-pm2.sh ./start-pm2.sh
+COPY docker-entrypoint.sh /app/
+RUN chmod +x /app/docker-entrypoint.sh
 
 # Create data directory and set env
 RUN mkdir -p /app/data
@@ -42,4 +44,4 @@ ENV HOST=0.0.0.0
 
 EXPOSE 3002
 
-CMD ["bun", "run", "src/server/index.ts"]
+CMD ["/app/docker-entrypoint.sh"]
