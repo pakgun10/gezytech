@@ -7,8 +7,6 @@ import {
 import { AgentList } from "@/client/components/sidebar/AgentList";
 import { SidebarFooterContent } from "@/client/components/sidebar/SidebarFooterContent";
 import { SystemHealthBar } from "@/client/components/sidebar/SystemHealthBar";
-import { BookOpen } from "lucide-react";
-import { useNavigate, useLocation } from "react-router-dom";
 
 interface AgentSummary {
   id: string;
@@ -67,10 +65,6 @@ export function AppSidebar({
   onReorderAgents,
   onOpenSettings,
 }: AppSidebarProps) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const isBooksRoute = location.pathname.startsWith("/books");
-
   return (
     <Sidebar className="surface-sidebar">
       {/* Brand/logo lives in <AppTopBar /> now. SystemHealthBar takes the top slot. */}
@@ -79,21 +73,6 @@ export function AppSidebar({
       <SidebarSeparator />
 
       <SidebarContent className="!overflow-hidden flex flex-col">
-        {/* Navigation link to Books */}
-        <div className="px-3 py-2">
-          <button
-            onClick={() => navigate("/books")}
-            className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors ${
-              isBooksRoute
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            }`}
-          >
-            <BookOpen className="size-4" />
-            <span>Books</span>
-          </button>
-        </div>
-
         <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
           <AgentList
             agents={agents}
