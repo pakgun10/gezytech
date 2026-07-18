@@ -32,9 +32,6 @@ test-results/
 # Docker files (avoid recursive context)
 docker/docker-compose.yml
 
-# Misc
-scripts/
-
 # Local-only secrets / tokens / exported context (never belong in any layer)
 npm_token
 .npmrc

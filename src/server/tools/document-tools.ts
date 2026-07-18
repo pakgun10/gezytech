@@ -116,8 +116,24 @@ export const generateDocxTool: ToolRegistration = {
   create: (ctx) =>
     tool({
       description:
-        "Render markdown content (headings, lists, tables, code blocks, and LaTeX math with $...$ / $$...$$ / ```math``` fences) into a Word (.docx) document with native editable equations, and get a shareable URL. Use this for substantial written deliverables (reports, study notes, RPP, physics/math solutions) instead of dumping long content in a chat message. Always share the URL with the user afterwards.\n\n" +
-        'For VERY long documents that exceed the chat output limit: first write the full markdown to the workspace with write_file(), then call this tool with source="workspace" and the file path.',
+        "Render markdown content (headings, lists, tables, code blocks, and LaTeX math with $...$ / $$...$$ / ```math``` fences) into a Word (.docx) document with native editable equations (OMML), and get a shareable URL.\n\n" +
+        "USE CASES:\n" +
+        "- RPP/RPM/Modul Ajar (Kurikulum Merdeka): generate_docx({title: 'RPP Matematika Kelas 7', ...})\n" +
+        "- Laporan penelitian / bahan ajar: generate_docx({...})\n" +
+        "- Study notes / physics/math solutions with equations\n\n" +
+        "FOR LONG DOCUMENTS (>400 lines markdown):\n" +
+        "1. write_file('rpp_part1.md', ...), write_file('rpp_part2.md', ...)\n" +
+        "2. run_shell('cat rpp_part2.md >> rpp_part1.md')\n" +
+        "3. generate_docx({source: 'workspace', path: 'rpp_part1.md', ...})\n\n" +
+        "BEFORE generating RPP, always READ reference files from file storage:\n" +
+        "1. list_stored_files() to see available references\n" +
+        "2. download_stored_file(name='CP.pdf') → read_file() — KUTIP CP, jangan mengarang\n" +
+        "3. download_stored_file(name='PPM.pdf') → read_file() — 8 DPL + 3 Prinsip + 3 Pengalaman + 4 Kerangka PM\n" +
+        "4. download_stored_file(name='atp.docx') → read_file() — ikuti alur TP\n" +
+        "5. download_stored_file(name='rpm.docx') → read_file() — tiru format contoh\n\n" +
+        "RPP must have 15 components: Identitas, CP, TP, DPL (8 dimensi), Model/Pendekatan/Metode, Prinsip PM, Pengalaman PM, Kerangka PM, Langkah Pembelajaran, Asesmen, KKTP, LKPD, Media/Sumber, Refleksi, Pengayaan & Remedial, Glosarium, Tanda Tangan, Lampiran.\n\n" +
+        "VERIFICATION: run_shell('python3 -c \"import zipfile; ...\"') to check OMML equations.\n\n" +
+        "Always share the returned URL with the user.",
       inputSchema: z.object({
         source: z
           .enum(["content", "workspace"])

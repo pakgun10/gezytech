@@ -1598,6 +1598,57 @@ export async function processNextMessage(agentId: string): Promise<boolean> {
       trimmedUserContentTokensSaved,
     } = await buildMessageHistory(agentId);
 
+    // ── Inject education skills as user-message preamble (recency bias) ──
+    // Education skills like rpp-generator are long-form instruction packs.
+    // Injecting them as a <skill-context> preamble on the last user message
+    // gives them recency bias — the LLM pays more attention to instructions
+    // that appear closer to its response position. This mirrors how GezyHD
+    // (Hermes Agent) injects skills as user messages rather than system prompt
+    // blocks (see competitive_benchmarking/analisis-mengapa-gezyhd-lebih-baik.md).
+    const activeSkills = await getActiveSkillsForAgent(agentId);
+    const educationSkills = activeSkills.filter(
+      (s) =>
+        (s as any).category === "education" ||
+        (s as any).tags?.some?.((t: string) =>
+          ["rpp", "rpm", "modul-ajar", "kurikulum", "guru"].includes(t),
+        ),
+    );
+    if (educationSkills.length > 0 && messageHistory.length > 0) {
+      // Find the last real user message (skip tool-result wrappers)
+      let lastUserIdx = -1;
+      for (let i = messageHistory.length - 1; i >= 0; i--) {
+        const msg = messageHistory[i]!;
+        if (
+          msg.role === "user" &&
+          msg.content.some((b: any) => b.type !== "tool-result")
+        ) {
+          lastUserIdx = i;
+          break;
+        }
+      }
+      if (lastUserIdx >= 0) {
+        // Build the skill message as a dedicated instruction block
+        const skillBlocks = educationSkills
+          .map(
+            (s) =>
+              `<skill-context name="${(s as any).name}">\n${(s as any).content}\n</skill-context>`,
+          )
+          .join("\n\n");
+        const skillMessageContent = `\n<instruction-notes>\n⚠️ IMPORTANT — The following skill instructions override your default behavior for this task. Follow them carefully.\n\n${skillBlocks}\n</instruction-notes>`;
+        // Insert as a SEPARATE user message right BEFORE the last user message.
+        // This mirrors GezyHD (Hermes Agent) where skills are injected as
+        // dedicated user messages rather than system prompt blocks.
+        messageHistory.splice(lastUserIdx, 0, {
+          role: "user" as const,
+          content: [{ type: "text" as const, text: skillMessageContent }],
+        });
+        log.info(
+          { agentId, skillNames: educationSkills.map((s) => (s as any).name) },
+          "Injected education skills as dedicated user message (GezyHD-style)",
+        );
+      }
+    }
+
     // Resolve the current message's originating platform for formatting hints
     let currentMessageSource:
       | { platform: string; senderName?: string }

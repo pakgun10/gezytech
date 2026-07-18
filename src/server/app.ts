@@ -13,6 +13,11 @@ import {
   mcpServers,
   contacts,
   user,
+  books,
+  bookSpines,
+  bookChapters,
+  bookPages,
+  bookBlocks,
 } from "@/server/db/schema";
 import { authMiddleware } from "@/server/auth/middleware";
 import { miniAppOriginGuard } from "@/server/auth/mini-app-origin-guard";
@@ -78,6 +83,7 @@ import { terminalRoutes } from "@/server/routes/terminal";
 import { usageRoutes } from "@/server/routes/usage";
 import { versionCheckRoutes } from "@/server/routes/version-check";
 import { googleDriveConnectionRoutes } from "@/server/routes/google-drive-connection";
+import { bookRoutes } from "@/server/routes/books";
 
 export type AppVariables = {
   session: { id: string; userId: string; token: string };
@@ -94,7 +100,19 @@ const log = createLogger("http");
 const globalCors = cors({
   origin: [
     "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5175",
     "http://localhost:3000",
+    "http://localhost:3002",
+    "http://localhost:3003",
+    "http://localhost:3004",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+    "http://127.0.0.1:5175",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3002",
+    "http://127.0.0.1:3003",
+    "http://127.0.0.1:3004",
     ...(process.env.TRUSTED_ORIGINS
       ? process.env.TRUSTED_ORIGINS.split(",").map((o) => o.trim())
       : []),
@@ -270,6 +288,7 @@ app.route("/api/logs", logRoutes);
 app.route("/api/terminal", terminalRoutes);
 app.route("/api/usage", usageRoutes);
 app.route("/api/version-check", versionCheckRoutes);
+app.route("/api/books", bookRoutes);
 app.route("/s", sharedRoutes);
 
 export { app };

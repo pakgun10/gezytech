@@ -6,7 +6,7 @@
  * lalu polling GET /api/agents/{slug}/messages untuk respons agent.
  */
 
-const GEZYTECH_URL = process.env.GEZYTECH_API_URL ?? "http://localhost:3000";
+const GEZYTECH_URL = process.env.GEZYTECH_API_URL ?? "http://localhost:3002";
 const SERVICE_TOKEN = process.env.GEZYTECH_SERVICE_TOKEN ?? "dev-token-shared";
 const POLL_INTERVAL_MS = 1500;
 const MAX_POLL_TIME_MS = 120_000;

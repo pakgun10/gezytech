@@ -6,7 +6,7 @@ import { seedDevUser, getDbUserByEmail, getDbUserById, type PlatformUser } from 
 import { getDb } from "./db";
 
 // ─── Init ───
-const GEZYTECH_URL = process.env.GEZYTECH_URL ?? "http://localhost:3000";
+const GEZYTECH_URL = process.env.GEZYTECH_URL ?? "http://localhost:3002";
 const SERVICE_TOKEN = process.env.GEZYTECH_SERVICE_TOKEN ?? "dev-token-shared";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "admin-secret-change-me";
 

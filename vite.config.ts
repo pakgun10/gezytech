@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
+const backendTarget = process.env.VITE_PROXY_TARGET ?? `http://localhost:${process.env.PORT || 3002}`
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   root: 'src/client',
@@ -42,12 +44,12 @@ export default defineConfig({
     proxy: {
       // Terminal WebSocket (must be declared before the generic /api rule)
       '/api/terminal/ws': {
-        target: (process.env.VITE_PROXY_TARGET ?? 'http://localhost:3000'),
+        target: backendTarget,
         changeOrigin: true,
         ws: true,
       },
       '/api/sse': {
-        target: (process.env.VITE_PROXY_TARGET ?? 'http://localhost:3000'),
+        target: backendTarget,
         changeOrigin: true,
         // SSE: disable proxy response buffering so events stream through immediately
         configure: (proxy) => {
@@ -58,7 +60,7 @@ export default defineConfig({
         },
       },
       '/api': {
-        target: (process.env.VITE_PROXY_TARGET ?? 'http://localhost:3000'),
+        target: backendTarget,
         changeOrigin: true,
       },
     },
