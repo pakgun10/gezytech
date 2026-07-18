@@ -31,8 +31,9 @@ COPY --from=builder /app/platform-app ./platform-app
 COPY --from=builder /app/start-pm2.sh ./start-pm2.sh
 COPY --from=builder /app/node_modules ./node_modules
 
-# Create data directory
+# Create data directory and set env
 RUN mkdir -p /app/data
+ENV GEZY_DATA_DIR=/app/data
 
 EXPOSE 3002
 
