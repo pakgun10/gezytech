@@ -26,6 +26,8 @@ services:
       - PUBLIC_URL=https://aios.gezytech.web.id
       - TRUSTED_ORIGINS=https://aios.gezytech.web.id
       - GEZY_TIMEZONE=Asia/Jakarta
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - GEZY_ADAPTIVE_THINKING=true
       - OWNER_TELEGRAM_USER_ID=${OWNER_TELEGRAM_USER_ID}
       - ALLOW_ALL_USERS_IN_GROUPS=${ALLOW_ALL_USERS_IN_GROUPS}
