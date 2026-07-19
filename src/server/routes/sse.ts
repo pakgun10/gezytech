@@ -10,6 +10,11 @@ const sseRoutes = new Hono<{ Variables: AppVariables }>()
 sseRoutes.get('/', (c) => {
   const user = c.get('user') as { id: string }
 
+  c.header("Content-Type", "text/event-stream")
+  c.header("Cache-Control", "no-cache, no-transform")
+  c.header("Connection", "keep-alive")
+  c.header("X-Accel-Buffering", "no")
+
   return streamSSE(c, async (stream) => {
     const connectionId = uuid()
 
