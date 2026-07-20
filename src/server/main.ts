@@ -34,6 +34,7 @@ import { WhatsAppAdapter } from '@/server/channels/whatsapp'
 import { whatsAppWebAdapter } from '@/server/channels/whatsapp-web'
 import { SignalAdapter } from '@/server/channels/signal'
 import { MatrixAdapter } from '@/server/channels/matrix'
+import { WebsiteAdapter } from '@/server/channels/website'
 import { restoreActiveChannels } from '@/server/services/channels'
 import { ensureUserContactsExist } from '@/server/services/contacts'
 import { pluginManager } from '@/server/services/plugins'
@@ -190,6 +191,7 @@ channelAdapters.register(new WhatsAppAdapter())
 channelAdapters.register(whatsAppWebAdapter)
 channelAdapters.register(new SignalAdapter())
 channelAdapters.register(new MatrixAdapter())
+channelAdapters.register(new WebsiteAdapter())
 restoreActiveChannels().catch((err) => log.error({ err }, 'Failed to restore active channels'))
 
 // File storage cleanup cron

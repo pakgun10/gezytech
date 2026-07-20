@@ -57,6 +57,27 @@ function channelWebhookUrl(platform: string, channelId: string): string | null {
   return `${base}/api/channels/plugin/${platform}/webhook/${channelId}`
 }
 
+function channelPublicUrl(platform: string, platformConfig: string): string | null {
+  if (platform !== 'website') return null
+  try {
+    const cfg = JSON.parse(platformConfig) as { publicUrl?: unknown }
+    return typeof cfg.publicUrl === 'string' && cfg.publicUrl.trim() ? cfg.publicUrl.trim() : null
+  } catch {
+    return null
+  }
+}
+
+function normalizedPublicUrl(value: string): string | null {
+  try {
+    const url = new URL(value.trim())
+    url.hash = ''
+    url.search = ''
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+  } catch {
+    return null
+  }
+}
+
 function serializeChannel(channel: any, agentInfo?: AgentInfo, pendingApprovalCount = 0): ChannelSummary {
   return {
     id: channel.id,
@@ -75,6 +96,7 @@ function serializeChannel(channel: any, agentInfo?: AgentInfo, pendingApprovalCo
     createdAt: new Date(channel.createdAt).getTime(),
     pendingApprovalCount,
     webhookUrl: channelWebhookUrl(channel.platform, channel.id),
+    publicUrl: channelPublicUrl(channel.platform, channel.platformConfig),
   }
 }
 
@@ -105,6 +127,56 @@ channelRoutes.get('/', async (c) => {
 // GET /api/channels/platforms — list registered platforms with metadata
 channelRoutes.get('/platforms', async (c) => {
   return c.json({ platforms: channelAdapters.listWithMeta() })
+})
+
+// GET /api/channels/website/resolve — service endpoint for public-app routing
+channelRoutes.get('/website/resolve', async (c) => {
+  const channelId = c.req.query('channelId')?.trim()
+  const publicUrl = c.req.query('publicUrl')?.trim()
+  const normalizedRequestedUrl = publicUrl ? normalizedPublicUrl(publicUrl) : null
+
+  if (publicUrl && !normalizedRequestedUrl) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'publicUrl must be a valid URL' } }, 400)
+  }
+
+  const websiteChannels = (await listChannels()).filter((ch) => {
+    if (ch.platform !== 'website' || ch.status !== 'active') return false
+    if (channelId) return ch.id === channelId
+    if (!normalizedRequestedUrl) return true
+    const configuredUrl = channelPublicUrl(ch.platform, ch.platformConfig)
+    return configuredUrl ? normalizedPublicUrl(configuredUrl) === normalizedRequestedUrl : false
+  })
+
+  if (websiteChannels.length === 0) {
+    return c.json({ error: { code: 'NOT_FOUND', message: 'Active Web Chat channel not found' } }, 404)
+  }
+  if (websiteChannels.length > 1) {
+    return c.json(
+      {
+        error: {
+          code: 'AMBIGUOUS_CHANNEL',
+          message: 'Multiple active Web Chat channels match; pass channelId or publicUrl.',
+        },
+      },
+      409,
+    )
+  }
+
+  const channel = websiteChannels[0]!
+  const agent = await db
+    .select({ id: agents.id, slug: agents.slug, name: agents.name, avatarPath: agents.avatarPath })
+    .from(agents)
+    .where(eq(agents.id, channel.agentId))
+    .get()
+
+  if (!agent?.slug) {
+    return c.json({ error: { code: 'AGENT_NOT_FOUND', message: 'Channel Agent not found' } }, 404)
+  }
+
+  return c.json({
+    channel: serializeChannel(channel, { name: agent.name, avatarPath: agent.avatarPath }),
+    agent: { id: agent.id, slug: agent.slug, name: agent.name },
+  })
 })
 
 // GET /api/channels/pending-count — global pending approval count (must be before /:id)

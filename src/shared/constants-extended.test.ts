@@ -324,6 +324,7 @@ describe('KNOWN_CHANNEL_PLATFORMS', () => {
     expect(KNOWN_CHANNEL_PLATFORMS).toContain('whatsapp')
     expect(KNOWN_CHANNEL_PLATFORMS).toContain('signal')
     expect(KNOWN_CHANNEL_PLATFORMS).toContain('matrix')
+    expect(KNOWN_CHANNEL_PLATFORMS).toContain('website')
   })
 
   it('has no duplicates', () => {

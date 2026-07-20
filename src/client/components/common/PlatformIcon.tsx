@@ -10,6 +10,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   'whatsapp-web': '#25D366',
   signal: '#3A76F0',
   matrix: '#0DBD8B',
+  website: '#00BFA6',
 }
 
 function TelegramSvg({ className, color }: { className?: string; color?: string }) {
@@ -60,6 +61,25 @@ function MatrixSvg({ className, color }: { className?: string; color?: string })
   )
 }
 
+function WebsiteSvg({ className, color }: { className?: string; color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M4 6.75A2.75 2.75 0 0 1 6.75 4h10.5A2.75 2.75 0 0 1 20 6.75v6.5A2.75 2.75 0 0 1 17.25 16H13.5L12 19l-1.5-3H6.75A2.75 2.75 0 0 1 4 13.25v-6.5Z"
+        stroke={color ?? 'currentColor'}
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 9h8M8 12h5.5"
+        stroke={color ?? 'currentColor'}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 const PLATFORM_ICONS: Record<string, React.FC<{ className?: string; color?: string }>> = {
   telegram: TelegramSvg,
   discord: DiscordSvg,
@@ -68,6 +88,7 @@ const PLATFORM_ICONS: Record<string, React.FC<{ className?: string; color?: stri
   'whatsapp-web': WhatsAppSvg,
   signal: SignalSvg,
   matrix: MatrixSvg,
+  website: WebsiteSvg,
 }
 
 interface PlatformIconProps {

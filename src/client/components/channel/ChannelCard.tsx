@@ -8,6 +8,7 @@ import { AgentBadge } from '@/client/components/common/AgentBadge'
 import { Pencil, Send, MessageSquare, Clock, ChevronDown, Plug, Loader2, QrCode } from 'lucide-react'
 import { ConfirmDeleteButton } from '@/client/components/common/ConfirmDeleteButton'
 import { cn } from '@/client/lib/utils'
+import { usePlatforms } from '@/client/hooks/usePlatforms'
 import type { ChannelSummary } from '@/shared/types'
 
 interface ChannelCardProps {
@@ -23,8 +24,20 @@ interface ChannelCardProps {
   onRepair?: () => void
 }
 
-export function ChannelCard({ channel, expanded, testing, onToggleExpand, onEdit, onDelete, onToggle, onTest, onRepair }: ChannelCardProps) {
+export function ChannelCard({
+  channel,
+  expanded,
+  testing,
+  onToggleExpand,
+  onEdit,
+  onDelete,
+  onToggle,
+  onTest,
+  onRepair,
+}: ChannelCardProps) {
   const { t } = useTranslation()
+  const { platforms } = usePlatforms()
+  const platformLabel = platforms.find((p) => p.platform === channel.platform)?.displayName ?? channel.platform
 
   return (
     <Card className={cn('surface-card', expanded && 'rounded-b-none border-b-0')}>
@@ -45,8 +58,8 @@ export function ChannelCard({ channel, expanded, testing, onToggleExpand, onEdit
             <div className="flex items-center gap-2 flex-wrap">
               <p className="text-sm font-medium truncate">{channel.name}</p>
               <AgentBadge name={channel.agentName} avatarUrl={channel.agentAvatarUrl} />
- <Badge variant="outline" size="xs" className="shrink-0 capitalize">
-                {channel.platform}
+              <Badge variant="outline" size="xs" className="shrink-0 capitalize">
+                {platformLabel}
               </Badge>
               <Badge
                 variant="outline"

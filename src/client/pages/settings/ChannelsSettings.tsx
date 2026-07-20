@@ -23,6 +23,7 @@ import { ChannelFormDialog } from '@/client/components/channel/ChannelFormDialog
 import { ChannelRepairDialog } from '@/client/components/channel/ChannelRepairDialog'
 import { ChannelUserMappings } from '@/client/components/channel/ChannelUserMappings'
 import { ChannelWebhookField } from '@/client/components/channel/ChannelWebhookField'
+import { ChannelPublicUrlField } from '@/client/components/channel/ChannelPublicUrlField'
 import { usePlatforms } from '@/client/hooks/usePlatforms'
 import type { ChannelSummary } from '@/shared/types'
 import type { AgentOption } from '@/client/components/common/AgentSelectItem'
@@ -306,6 +307,7 @@ export function ChannelsSettings() {
             <CollapsibleContent>
               <div className="border border-t-0 rounded-b-xl bg-card px-4 py-3 space-y-3">
                 {channel.webhookUrl && <ChannelWebhookField url={channel.webhookUrl} />}
+                {channel.publicUrl && <ChannelPublicUrlField url={channel.publicUrl} />}
                 {/* Approval requirement toggle (secure default: ON) */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-3">

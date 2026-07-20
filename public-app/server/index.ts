@@ -34,6 +34,9 @@ import {
 // ─── Init ───
 const GEZYTECH_URL = process.env.GEZYTECH_API_URL ?? "http://localhost:3002";
 const SERVICE_TOKEN = process.env.GEZYTECH_SERVICE_TOKEN ?? "dev-token-shared";
+const WEBCHAT_CHANNEL_ID = process.env.GEZYTECH_WEBCHAT_CHANNEL_ID ?? "";
+const CONFIGURED_PUBLIC_WEBCHAT_URL =
+  process.env.PUBLIC_WEBCHAT_URL ?? process.env.WEBCHAT_PUBLIC_URL ?? "";
 runMigrations();
 if (process.env.DEV_MODE === "true") {
   const devUser = await seedDevUser();
@@ -43,6 +46,79 @@ if (process.env.DEV_MODE === "true") {
 }
 
 const app = new Hono();
+
+type PublicUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  agentSlug: string;
+};
+
+type WebChatBinding = {
+  agentSlug: string;
+  agentName?: string;
+  channelId?: string;
+  expiresAt: number;
+};
+
+const webChatBindingCache = new Map<string, WebChatBinding>();
+
+function getRequestWebchatUrl(c: any): string {
+  if (CONFIGURED_PUBLIC_WEBCHAT_URL) return CONFIGURED_PUBLIC_WEBCHAT_URL;
+
+  const reqUrl = new URL(c.req.url);
+  const proto =
+    c.req.header("x-forwarded-proto") ?? reqUrl.protocol.replace(":", "");
+  const host =
+    c.req.header("x-forwarded-host") ?? c.req.header("host") ?? reqUrl.host;
+  return `${proto}://${host}/webchat/`;
+}
+
+async function resolveWebChatAgentSlug(
+  c: any,
+  fallbackUser: PublicUser,
+): Promise<string> {
+  const now = Date.now();
+  const requestWebchatUrl = getRequestWebchatUrl(c);
+  const cacheKey = WEBCHAT_CHANNEL_ID
+    ? `channel:${WEBCHAT_CHANNEL_ID}`
+    : `url:${requestWebchatUrl}`;
+  const cached = webChatBindingCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.agentSlug;
+  }
+
+  const params = new URLSearchParams();
+  if (WEBCHAT_CHANNEL_ID) {
+    params.set("channelId", WEBCHAT_CHANNEL_ID);
+  } else {
+    params.set("publicUrl", requestWebchatUrl);
+  }
+
+  try {
+    const res = await fetch(
+      `${GEZYTECH_URL}/api/channels/website/resolve?${params}`,
+      { headers: { "x-service-token": SERVICE_TOKEN } },
+    );
+    if (!res.ok) return fallbackUser.agentSlug;
+
+    const data = await res.json();
+    const agentSlug = data.agent?.slug;
+    if (typeof agentSlug !== "string" || !agentSlug) {
+      return fallbackUser.agentSlug;
+    }
+
+    webChatBindingCache.set(cacheKey, {
+      agentSlug,
+      agentName: data.agent?.name,
+      channelId: data.channel?.id,
+      expiresAt: now + 30_000,
+    });
+    return agentSlug;
+  } catch {
+    return fallbackUser.agentSlug;
+  }
+}
 
 app.get("/api/health", (c) =>
   c.json({ status: "ok", service: "gezytech-public" }),
@@ -101,7 +177,7 @@ app.post("/api/auth/login", async (c) => {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
-      agentSlug: user.agentSlug,
+      agentSlug: await resolveWebChatAgentSlug(c, user),
     },
   });
 });
@@ -115,7 +191,7 @@ app.post("/api/auth/logout", (c) => {
   return c.json({ success: true });
 });
 
-app.get("/api/auth/me", (c) => {
+app.get("/api/auth/me", async (c) => {
   const devUser = getDevUser();
   if (devUser) {
     return c.json({
@@ -123,7 +199,7 @@ app.get("/api/auth/me", (c) => {
         id: devUser.id,
         email: devUser.email,
         displayName: devUser.displayName,
-        agentSlug: devUser.agentSlug,
+        agentSlug: await resolveWebChatAgentSlug(c, devUser),
       },
     });
   }
@@ -138,7 +214,7 @@ app.get("/api/auth/me", (c) => {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
-      agentSlug: user.agentSlug,
+      agentSlug: await resolveWebChatAgentSlug(c, user),
     },
   });
 });
@@ -288,7 +364,7 @@ app.post("/api/admin/sync-agents", adminAuth, async (c) => {
 
 app.post("/api/chat", requireAuth, async (c) => {
   const user: any = c.get("user");
-  const agentSlug = user.agentSlug;
+  const agentSlug = await resolveWebChatAgentSlug(c, user);
   const { message, sessionId } = await c.req.json<{
     message?: string;
     sessionId?: string;
@@ -368,7 +444,7 @@ app.post("/api/chat", requireAuth, async (c) => {
 // Chat history — proxy to gezytech
 app.get("/api/chat/history", requireAuth, async (c) => {
   const user: any = c.get("user");
-  const agentSlug = user.agentSlug;
+  const agentSlug = await resolveWebChatAgentSlug(c, user);
   const sessionId = c.req.query("sessionId");
 
   try {
@@ -424,7 +500,7 @@ app.get("/api/token-usage", requireAuth, (c) => {
 
 app.get("/api/memory", requireAuth, async (c) => {
   const user: any = c.get("user");
-  const agentSlug = user.agentSlug;
+  const agentSlug = await resolveWebChatAgentSlug(c, user);
 
   try {
     const res = await fetch(
@@ -445,7 +521,7 @@ app.get("/api/memory", requireAuth, async (c) => {
 
 app.post("/api/session/new", requireAuth, async (c) => {
   const user: any = c.get("user");
-  const agentSlug = user.agentSlug;
+  const agentSlug = await resolveWebChatAgentSlug(c, user);
   const { title } = (await c.req.json<{ title?: string }>()) ?? {};
 
   async function createSession() {
@@ -524,7 +600,7 @@ app.post("/api/session/new", requireAuth, async (c) => {
 
 app.get("/api/sessions", requireAuth, async (c) => {
   const user: any = c.get("user");
-  const agentSlug = user.agentSlug;
+  const agentSlug = await resolveWebChatAgentSlug(c, user);
 
   try {
     const res = await fetch(

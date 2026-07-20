@@ -639,7 +639,7 @@ export interface QuickSessionSummary {
 
 // ─── Channel types ──────────────────────────────────────────────────────────
 
-export type KnownChannelPlatform = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'signal' | 'matrix'
+export type KnownChannelPlatform = 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'signal' | 'matrix' | 'website'
 export type ChannelPlatform = KnownChannelPlatform | (string & {})
 
 export type ChannelStatus = 'active' | 'inactive' | 'error'
@@ -682,6 +682,8 @@ export interface ChannelSummary {
    * webhooks; `null` for built-in or non-webhook channels.
    */
   webhookUrl: string | null
+  /** Public browser URL where end users open this channel, when applicable. */
+  publicUrl?: string | null
 }
 
 /** Pending channel user awaiting approval */

@@ -199,7 +199,7 @@ export const MEMORY_SCOPES = ['private', 'shared'] as const
 
 export const MESSAGE_SOURCES = ['user', 'agent', 'task', 'cron', 'system', 'webhook', 'channel'] as const
 
-export const KNOWN_CHANNEL_PLATFORMS = ['telegram', 'discord', 'slack', 'whatsapp', 'signal', 'matrix'] as const
+export const KNOWN_CHANNEL_PLATFORMS = ['telegram', 'discord', 'slack', 'whatsapp', 'signal', 'matrix', 'website'] as const
 
 export const TASK_STATUSES = ['pending', 'in_progress', 'awaiting_human_input', 'completed', 'failed', 'cancelled'] as const
 
