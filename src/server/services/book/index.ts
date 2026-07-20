@@ -36,7 +36,7 @@ export async function createBookRecord(
   language: string = "en",
   knowledgeBaseIds: string[] = [],
 ): Promise<Book> {
-  const now = Date.now();
+  const now = new Date();
   const book = {
     id: uuid(),
     userId,
@@ -61,7 +61,7 @@ export async function updateBookProposal(
   bookId: string,
   proposal: BookProposal,
 ): Promise<void> {
-  const now = Date.now();
+  const now = new Date();
   db.update(books)
     .set({
       title: proposal.title,
@@ -80,7 +80,7 @@ export async function updateBookStatus(
   status: string,
   extra: Partial<{ pageCount: number; chapterCount: number }> = {},
 ): Promise<void> {
-  const now = Date.now();
+  const now = new Date();
   const set: Record<string, unknown> = { status, updatedAt: now };
   if (extra.pageCount !== undefined) set.pageCount = extra.pageCount;
   if (extra.chapterCount !== undefined) set.chapterCount = extra.chapterCount;
@@ -102,7 +102,7 @@ export async function saveSpine(spine: Spine): Promise<void> {
   const data = {
     bookId: spine.bookId,
     conceptGraph: JSON.stringify(spine.conceptGraph),
-    createdAt: Date.now(),
+    createdAt: new Date(),
   };
   if (existing) {
     db.update(bookSpines)
@@ -184,7 +184,7 @@ export async function createPageShell(
   title: string,
   order: number,
 ): Promise<{ id: string }> {
-  const now = Date.now();
+  const now = new Date();
   const page = {
     id: uuid(),
     bookId,
@@ -247,7 +247,7 @@ export async function savePage(
   pageId: string,
   updates: { status?: string; blocks?: Block[] },
 ) {
-  const set: Record<string, unknown> = { updatedAt: Date.now() };
+  const set: Record<string, unknown> = { updatedAt: new Date() };
   if (updates.status !== undefined) set.status = updates.status;
   if (updates.blocks !== undefined) set.blocks = JSON.stringify(updates.blocks);
   db.update(bookPages).set(set).where(eq(bookPages.id, pageId)).run();
