@@ -181,9 +181,12 @@ async function generateBlock(
   }
 
   const result = await runOneShot(resolved, {
+    system: [{ type: "text", text: systemPrompt }],
     messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
+      {
+        role: "user",
+        content: [{ type: "text", text: userPrompt }],
+      },
     ],
   });
 

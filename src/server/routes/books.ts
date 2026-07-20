@@ -73,9 +73,12 @@ async function callLLM(
   }
 
   const result = await runOneShot(targetResolved, {
+    system: [{ type: "text", text: systemPrompt }],
     messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
+      {
+        role: "user",
+        content: [{ type: "text", text: userPrompt }],
+      },
     ],
   });
 
